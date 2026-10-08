@@ -44,8 +44,11 @@ Deno.serve(async (req) => {
   if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
 
   let idToken = "";
+  let accessToken = "";
   try {
-    idToken = String((await req.json()).idToken ?? "");
+    const body = await req.json();
+    idToken = String(body.idToken ?? "");
+    accessToken = String(body.accessToken ?? "");
   } catch {
     return json({ error: "bad_request" }, 400);
   }
@@ -61,6 +64,27 @@ Deno.serve(async (req) => {
   if (!verify.ok) return json({ error: "invalid_token" }, 401);
   const line = await verify.json() as { sub?: string; name?: string; picture?: string };
   if (!line.sub) return json({ error: "invalid_token" }, 401);
+
+  // IDトークンに名前が入っていない場合（profileの許可が後から出た場合など）は、
+  // 同じチャネル・同じ本人のアクセストークンであることを確かめてからプロフィールを取得する
+  if (!line.name && accessToken) {
+    try {
+      const v = await fetch(`https://api.line.me/oauth2/v2.1/verify?access_token=${encodeURIComponent(accessToken)}`);
+      const vt = v.ok ? await v.json() as { client_id?: string; expires_in?: number } : {};
+      if (vt.client_id === aud && (vt.expires_in ?? 0) > 0) {
+        const p = await fetch("https://api.line.me/v2/profile", { headers: { Authorization: `Bearer ${accessToken}` } });
+        if (p.ok) {
+          const prof = await p.json() as { userId?: string; displayName?: string; pictureUrl?: string };
+          if (prof.userId === line.sub) {
+            line.name = prof.displayName;
+            line.picture = prof.pictureUrl;
+          }
+        }
+      }
+    } catch (e) {
+      console.error("profile", (e as Error).message);
+    }
+  }
 
   const url = Deno.env.get("SUPABASE_URL")!;
   const opts = { auth: { persistSession: false, autoRefreshToken: false } };
@@ -98,15 +122,10 @@ Deno.serve(async (req) => {
   }
 
   // 4. 会員表を作成・更新（役割などはここでは変えない）
-  const { error: upErr } = await admin.from("members").upsert(
-    {
-      id: link.user.id,
-      line_user_id: line.sub,
-      line_name: line.name ?? null,
-      line_picture_url: line.picture ?? null,
-    },
-    { onConflict: "id" },
-  );
+  const row: Record<string, string> = { id: link.user.id, line_user_id: line.sub };
+  if (line.name) row.line_name = line.name;
+  if (line.picture) row.line_picture_url = line.picture;
+  const { error: upErr } = await admin.from("members").upsert(row, { onConflict: "id" });
   if (upErr) {
     console.error("members upsert", upErr.message);
     return json({ error: "server_error" }, 500);

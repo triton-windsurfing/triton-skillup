@@ -61,12 +61,17 @@
         liff.login({ redirectUri: location.href });
         return new Promise(() => {}); // LINEのログイン画面へ移動する
       }
+      // 名前とプロフィール写真の利用許可がまだなら、ここで許可画面を出す
+      try {
+        const p = await liff.permission.query("profile");
+        if (p.state === "prompt") await liff.permission.requestAll();
+      } catch { /* 許可画面が使えない環境では名前なしで続ける */ }
       const idToken = liff.getIDToken();
       if (!idToken) throw new Error("LINEの情報を取得できませんでした。");
       const r = await fetch(`${C.supabaseUrl}/functions/v1/line-login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ idToken }),
+        body: JSON.stringify({ idToken, accessToken: liff.getAccessToken() }),
       });
       if (r.status === 401 && !sessionStorage.getItem(loginOnce)) {
         // LINE側のログイン情報が古い場合は一度だけやり直す
