@@ -91,7 +91,12 @@
         await liff.init({ liffId: C.liffId });
         if (!(await uid())) await loginWithLine();
         try {
-          return await this.me();
+          const me = await this.me();
+          // LINEの名前がまだ入っていなければ、最新のLINE情報で入り直して名前と写真を反映する
+          if (!me.line_name && liff.isLoggedIn() && liff.getIDToken()) {
+            try { await loginWithLine(); return await this.me(); } catch { /* 名前がなくても使える */ }
+          }
+          return me;
         } catch (e) {
           // 保存されていたログイン状態が使えない場合はLINEで入り直す
           await sb.auth.signOut({ scope: "local" });
