@@ -93,7 +93,14 @@
         sb = window.supabase.createClient(C.supabaseUrl, C.supabaseKey, {
           auth: { persistSession: true, autoRefreshToken: true, storageKey: "triton-auth", detectSessionInUrl: false },
         });
-        await liff.init({ liffId: C.liffId });
+        try {
+          await Promise.race([
+            liff.init({ liffId: C.liffId }),
+            new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), 15000)),
+          ]);
+        } catch (e) {
+          throw new Error(`LINEとの接続を始められませんでした（${(e && (e.code || e.message)) || "不明"}）。`);
+        }
         if (!(await uid())) await loginWithLine();
         try {
           const me = await this.me();
