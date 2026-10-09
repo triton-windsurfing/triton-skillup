@@ -4,8 +4,8 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 
 // IDトークンの発行元として受け付けるLINEミニアプリのチャネルID
-// （開発用。本番公開時に本番用のチャネルIDを追加する）
-const ALLOWED_CHANNEL_IDS = ["2011936101"];
+// （2011936101：開発用、2011936103：本番用）
+const ALLOWED_CHANNEL_IDS = ["2011936101", "2011936103"];
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
