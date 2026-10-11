@@ -40,6 +40,7 @@
     flag: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 21V4h11l-2 4 2 4H5"/></svg>',
     list: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10"/></svg>',
     staff: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.5 3-5.5 6.5-5.5s6.5 2 6.5 5.5"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14.8c2 .7 3.5 2.4 3.5 5.2"/></svg>',
+    play: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.5v13l11-6.5z"/></svg>',
     tool: '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.5 6.5a4 4 0 0 0-5.2 5.2L3 18l3 3 6.3-6.3a4 4 0 0 0 5.2-5.2l-2.7 2.7-2.3-.7-.7-2.3z"/></svg>',
   };
 
@@ -136,6 +137,8 @@
       async recordLesson(memberId, comment, date) { ok(await sb.rpc("record_lesson", { p_member_id: memberId, p_comment: comment, p_date: date })); },
       async setGoal(n) { ok(await sb.rpc("set_monthly_goal", { p_goal: n })); },
       async updateMember(id, patch) { ok(await sb.from("members").update(patch).eq("id", id)); },
+      async setItemVideo(itemId, url) { ok(await sb.rpc("set_item_video", { p_item_id: itemId, p_url: url })); },
+      openVideo(url) { liff.openWindow({ url, external: true }); },
     };
   }
 
@@ -157,7 +160,8 @@
       ["free",3,"トリック","フリースタイル Lv3","#F2C230","#14263A",["クリューファーストヘリタック","テールファースト","セイルボディ360","ベンダー（風下回りの360）","ボード360（風上回り）"]],
     ];
     const levels = L.map(([track, level, grade, theme, color, fg]) => ({ track, level, grade, theme, color, fg }));
-    const items = L.flatMap(([track, level, , , , , labels]) => labels.map((label, i) => ({ id: `${track}-${level}-${i}`, track, level, position: i, label })));
+    const items = L.flatMap(([track, level, , , , , labels]) => labels.map((label, i) => ({ id: `${track}-${level}-${i}`, track, level, position: i, label, video_url: null })));
+    items.find((i) => i.id === "basic-3-1").video_url = "https://youtu.be/tiW3LUb9MxY";
     const now = new Date().toISOString();
     const people = [
       { id: "d1", line_name: "お試し 管理者", display_name: null, role: "admin", sport: "wind", plan: "月会員", monthly_goal: 4, line_picture_url: null },
@@ -209,6 +213,8 @@
       async recordLesson(mid, comment, date) { lessons.push({ id: nextId++, member_id: mid, lesson_date: date || t, instructor_name: "お試し 管理者", comment: comment || null }); },
       async setGoal(n) { people[0].monthly_goal = n; },
       async updateMember(id, patch) { Object.assign(people.find((p) => p.id === id), patch); },
+      async setItemVideo(iid, url) { items.find((i) => i.id === iid).video_url = url || null; },
+      openVideo(url) { window.open(url, "_blank", "noopener"); },
     };
   }
 
@@ -276,10 +282,12 @@
     const box = `<span class="box ${i.cert ? "cert" : i.self ? "self" : ""}">${i.cert || (i.self && mode === "member") ? ICON.check : ""}</span>`;
     const status = i.cert ? '<span class="certtxt">認定</span>'
       : i.self ? `<span class="pill wait">${mode === "staff" ? "本人チェック済み" : "認定待ち"}</span>` : "";
+    const video = i.video_url
+      ? `<button type="button" class="vid" data-act="video" data-url="${esc(i.video_url)}" aria-label="${esc(i.label)}の動画を見る">${ICON.play}動画</button>` : "";
     if (mode === "member") {
-      return `<button type="button" class="item" data-act="self" data-item="${esc(i.id)}" aria-pressed="${i.cert || i.self}"${i.cert ? " disabled" : ""}>${box}<span class="t">${esc(i.label)}</span>${status}</button>`;
+      return `<div class="item-row"><button type="button" class="item" data-act="self" data-item="${esc(i.id)}" aria-pressed="${i.cert || i.self}"${i.cert ? " disabled" : ""}>${box}<span class="t">${esc(i.label)}</span>${status}</button>${video}</div>`;
     }
-    return `<button type="button" class="item" data-act="cert" data-item="${esc(i.id)}" data-val="${!i.cert}" aria-pressed="${i.cert}">${box}<span class="t">${esc(i.label)}</span>${status}</button>`;
+    return `<div class="item-row"><button type="button" class="item" data-act="cert" data-item="${esc(i.id)}" data-val="${!i.cert}" aria-pressed="${i.cert}">${box}<span class="t">${esc(i.label)}</span>${status}</button>${video}</div>`;
   }
 
   function trackTabs() {
@@ -311,7 +319,7 @@
       const next = cur ? cur.items.filter((i) => !i.cert) : [];
       body = `
         <div class="card"><div class="between"><h2>次の目標</h2><a href="#/roadmap" style="font-weight:700">ロードマップを見る</a></div>
-          ${next.length ? next.map((i) => `<div class="goal"><span class="box ${i.self ? "self" : ""}" style="width:22px;height:22px">${i.self ? ICON.check : ""}</span><span class="t">${esc(i.label)}</span>${i.self ? '<span class="pill wait">認定待ち</span>' : ""}</div>`).join("") : '<p class="muted">すべての項目が認定されています。</p>'}
+          ${next.length ? next.map((i) => `<div class="goal"><span class="box ${i.self ? "self" : ""}" style="width:22px;height:22px">${i.self ? ICON.check : ""}</span><span class="t">${esc(i.label)}</span>${i.self ? '<span class="pill wait">認定待ち</span>' : ""}${i.video_url ? `<button type="button" class="vid" data-act="video" data-url="${esc(i.video_url)}" aria-label="${esc(i.label)}の動画を見る">${ICON.play}動画</button>` : ""}</div>`).join("") : '<p class="muted">すべての項目が認定されています。</p>'}
         </div>
         <div class="grid2">
           <div class="card"><div class="stat-label">海に出た回数（累計）</div><div class="stat"><span class="num">${S.lessons.length}</span><span>回</span></div></div>
@@ -377,6 +385,7 @@
       return l ? `<span class="lvchip" style="background:${esc(l.color)};color:${esc(l.fg)}">Lv${l.level}</span>` : `<span class="lvchip pill ok">全認定</span>`;
     };
     return `<div class="shell wide"><header class="top"><div class="top-row"><h1>会員一覧</h1><span class="sub">${st.list.length}人</span></div>
+        ${S.me.role === "admin" ? '<a class="back" href="#/videos" style="align-self:flex-start">動画リンクの設定 ›</a>' : ""}
         <input class="in" type="search" placeholder="名前でさがす" aria-label="名前でさがす" data-input="q" value="${esc(st.q)}" style="color:var(--ink)">
       </header>
       <main class="main">
@@ -434,6 +443,22 @@
       </main>${nav("staff")}</div>`;
   }
 
+  function viewVideos() {
+    const levels = S.levels.filter((l) => l.track === S.track);
+    return `<div class="shell"><header class="top">
+        <a class="back" href="#/staff">‹ 会員一覧</a>
+        <div><h1>動画リンクの設定</h1><div class="sub">YouTubeのリンクを貼ると、会員の画面の項目に「動画」ボタンが出ます。</div></div>
+        ${trackTabs()}
+      </header>
+      <main class="main">${levels.map((l) => `<div class="card"><h2>レベル${l.level} ${esc(l.theme)}</h2>
+        ${S.items.filter((i) => i.track === l.track && i.level === l.level).map((i) => `
+          <label class="f">${esc(i.label)}
+            <div class="row" style="flex-wrap:nowrap"><input class="in" type="url" inputmode="url" id="v-${esc(i.id)}" value="${esc(i.video_url || "")}" placeholder="https://youtu.be/…">
+            <button type="button" class="btn ghost" style="min-height:44px;padding:0 14px" data-act="save-video" data-item="${esc(i.id)}"${S.busy ? " disabled" : ""}>保存</button></div>
+          </label>`).join("")}</div>`).join("")}
+      </main>${nav("staff")}</div>`;
+  }
+
   // ---------- 画面の切り替え ----------
   function route() { return (location.hash || "#/").slice(1); }
 
@@ -442,6 +467,7 @@
     let html;
     if (r.startsWith("/staff/") && isStaff(S.me)) html = viewStaffDetail();
     else if (r === "/staff" && isStaff(S.me)) html = viewStaffList();
+    else if (r === "/videos" && S.me.role === "admin") html = viewVideos();
     else if (r === "/roadmap") html = viewRoadmap();
     else if (r === "/history") html = viewHistory();
     else html = viewHome();
@@ -484,6 +510,7 @@
     if (a === "sport") { S.sport = el.dataset.sport; store.set("triton-sport", S.sport); return render(); }
     if (a === "track") { S.track = el.dataset.track; return render(); }
     if (a === "filter") { S.staff.filter = el.dataset.filter; return render(); }
+    if (a === "video") { try { api.openVideo(el.dataset.url); } catch (e) { console.error(e); toast("動画を開けませんでした"); } return; }
     if (a === "open") {
       const lv = Number(el.dataset.lv);
       const inDetail = route().startsWith("/staff/");
@@ -511,6 +538,14 @@
         await loadDetail(S.detail.id);
         S.staff.list = null;
         toast("レッスンを記録しました");
+      } else if (a === "save-video") {
+        const id = el.dataset.item;
+        const url = document.getElementById("v-" + id).value.trim();
+        if (url && !/^https:\/\/(www\.|m\.)?(youtube\.com|youtu\.be)\//.test(url)) { toast("YouTubeのリンク（https://youtu.be/… など）を入れてください"); return; }
+        await api.setItemVideo(id, url);
+        const cat = await api.catalog();
+        S.items = cat.items;
+        toast(url ? "動画リンクを保存しました" : "動画リンクを外しました");
       } else if (a === "save-member") {
         const patch = {
           display_name: document.getElementById("m-name").value.trim() || null,
