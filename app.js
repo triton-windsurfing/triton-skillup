@@ -7,6 +7,7 @@
 
   const C = window.APP_CONFIG;
   const DEMO = new URLSearchParams(location.search).has("demo");
+  const VISITOR = DEMO && new URLSearchParams(location.search).has("visitor"); // お試し表示でビジターの見え方を確認する
   const $app = document.getElementById("app");
   const BADGES = [
     { lv: 3, name: "初級<br>卒業" },
@@ -29,6 +30,11 @@
   const nameOf = (m) => (m && (m.display_name || m.line_name)) || "名前未設定";
   const roleLabel = { member: "会員", instructor: "インストラクター", admin: "管理者" };
   const isStaff = (m) => m && (m.role === "instructor" || m.role === "admin");
+  const PLANS = ["スクール会員", "艇庫会員", "レンタル会員", "ビジター", "その他"];
+  const MEMBER_PLANS = ["スクール会員", "艇庫会員", "レンタル会員"];
+  // 会員（スクール・艇庫・レンタル）とスタッフは制限なし。ビジター・その他・未設定は基礎4／フリースタイル3まで
+  const isFull = (m) => !!m && (isStaff(m) || MEMBER_PLANS.includes(m.plan));
+  const capOf = (m, track) => (isFull(m) ? 99 : track === "basic" ? 4 : 3);
   const store = {
     get(k) { try { return localStorage.getItem(k); } catch { return null; } },
     set(k, v) { try { localStorage.setItem(k, v); } catch { /* 保存できなくても動く */ } },
@@ -40,6 +46,7 @@
     flag: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 21V4h11l-2 4 2 4H5"/></svg>',
     list: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10"/></svg>',
     staff: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.5 3-5.5 6.5-5.5s6.5 2 6.5 5.5"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14.8c2 .7 3.5 2.4 3.5 5.2"/></svg>',
+    lockSm: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>',
     play: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.5v13l11-6.5z"/></svg>',
     tool: '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.5 6.5a4 4 0 0 0-5.2 5.2L3 18l3 3 6.3-6.3a4 4 0 0 0 5.2-5.2l-2.7 2.7-2.3-.7-.7-2.3z"/></svg>',
   };
@@ -128,7 +135,7 @@
       async checks(memberId) { return ok(await sb.from("skill_checks").select("*").eq("member_id", memberId)); },
       async lessons(memberId) {
         return ok(await sb.from("lessons").select("*").eq("member_id", memberId)
-          .order("lesson_date", { ascending: false }).order("id", { ascending: false }).limit(200));
+          .order("lesson_date", { ascending: false }).order("id", { ascending: false }).limit(2000));
       },
       async member(id) { return ok(await sb.from("members").select("*").eq("id", id).single()); },
       async overview() { return ok(await sb.from("member_overview").select("*")); },
@@ -138,6 +145,10 @@
       async setGoal(n) { ok(await sb.rpc("set_monthly_goal", { p_goal: n })); },
       async updateMember(id, patch) { ok(await sb.from("members").update(patch).eq("id", id)); },
       async setItemVideo(itemId, url) { ok(await sb.rpc("set_item_video", { p_item_id: itemId, p_url: url })); },
+      async addOwnSession(date, memo) { ok(await sb.rpc("add_own_session", { p_date: date, p_memo: memo })); },
+      async setMemberMemo(id, memo) { ok(await sb.rpc("set_member_memo", { p_lesson_id: id, p_memo: memo })); },
+      async deleteOwnSession(id) { ok(await sb.rpc("delete_own_session", { p_lesson_id: id })); },
+      async setLessonComment(id, comment) { ok(await sb.rpc("set_lesson_comment", { p_lesson_id: id, p_comment: comment })); },
       openVideo(url) { liff.openWindow({ url, external: true }); },
     };
   }
@@ -164,9 +175,11 @@
     items.find((i) => i.id === "basic-3-1").video_url = "https://youtu.be/tiW3LUb9MxY";
     const now = new Date().toISOString();
     const people = [
-      { id: "d1", line_name: "お試し 管理者", display_name: null, role: "admin", sport: "wind", plan: "月会員", monthly_goal: 4, line_picture_url: null },
-      { id: "d2", line_name: "海野 ナギサ", display_name: null, role: "member", sport: "wind", plan: "月会員", monthly_goal: 4, line_picture_url: null },
-      { id: "d3", line_name: "浜田 ケン", display_name: null, role: "member", sport: "wind", plan: "回数券", monthly_goal: null, line_picture_url: null },
+      VISITOR
+        ? { id: "d1", line_name: "お試し ビジター", display_name: null, role: "member", sport: "wind", plan: "ビジター", monthly_goal: 4, line_picture_url: null }
+        : { id: "d1", line_name: "お試し 管理者", display_name: null, role: "admin", sport: "wind", plan: null, monthly_goal: 4, line_picture_url: null },
+      { id: "d2", line_name: "海野 ナギサ", display_name: null, role: "member", sport: "wind", plan: "スクール会員", monthly_goal: 4, line_picture_url: null },
+      { id: "d3", line_name: "浜田 ケン", display_name: null, role: "member", sport: "wind", plan: "ビジター", monthly_goal: null, line_picture_url: null },
     ];
     const checks = [];
     const certAll = (mid, ids) => ids.forEach((id) => checks.push({ member_id: mid, item_id: id, self_checked_at: now, certified_at: now, certified_by: "d1" }));
@@ -176,9 +189,10 @@
     checks.push({ member_id: "d2", item_id: "basic-3-0", self_checked_at: now, certified_at: null, certified_by: null });
     const t = todayJST();
     const lessons = [
-      { id: 3, member_id: "d1", lesson_date: t, instructor_name: "お試し 講師", comment: "ハーネスに体重を預けられるようになってきました。次は片手走行に挑戦しましょう。" },
-      { id: 2, member_id: "d1", lesson_date: "2026-09-28", instructor_name: "お試し 講師", comment: null },
-      { id: 1, member_id: "d2", lesson_date: "2026-08-20", instructor_name: "お試し 講師", comment: "タックが安定してきました。" },
+      { id: 4, member_id: "d1", lesson_date: t, source: "self", instructor_name: null, comment: null, member_memo: "北風5m。ジャイブで3回沈。" },
+      { id: 3, member_id: "d1", lesson_date: t, source: "staff", instructor_name: "お試し 講師", comment: "ハーネスに体重を預けられるようになってきました。次は片手走行に挑戦しましょう。", member_memo: null },
+      { id: 2, member_id: "d1", lesson_date: "2026-09-28", source: "staff", instructor_name: "お試し 講師", comment: null, member_memo: null },
+      { id: 1, member_id: "d2", lesson_date: "2025-08-20", source: "staff", instructor_name: "お試し 講師", comment: "タックが安定してきました。", member_memo: "風上に戻れた！" },
     ];
     let nextId = 10;
     const find = (mid, iid) => checks.find((c) => c.member_id === mid && c.item_id === iid);
@@ -210,7 +224,11 @@
         c.certified_at = v ? (c.certified_at || now) : null;
         c.certified_by = v ? "d1" : null;
       },
-      async recordLesson(mid, comment, date) { lessons.push({ id: nextId++, member_id: mid, lesson_date: date || t, instructor_name: "お試し 管理者", comment: comment || null }); },
+      async recordLesson(mid, comment, date) { lessons.push({ id: nextId++, member_id: mid, lesson_date: date || t, source: "staff", instructor_name: "お試し 管理者", comment: comment || null, member_memo: null }); },
+      async addOwnSession(date, memo) { lessons.push({ id: nextId++, member_id: "d1", lesson_date: date || t, source: "self", instructor_name: null, comment: null, member_memo: memo || null }); },
+      async setMemberMemo(id, memo) { lessons.find((l) => l.id === id).member_memo = memo || null; },
+      async deleteOwnSession(id) { const i = lessons.findIndex((l) => l.id === id && l.source === "self"); if (i >= 0) lessons.splice(i, 1); },
+      async setLessonComment(id, c) { lessons.find((l) => l.id === id).comment = c || null; },
       async setGoal(n) { people[0].monthly_goal = n; },
       async updateMember(id, patch) { Object.assign(people.find((p) => p.id === id), patch); },
       async setItemVideo(iid, url) { items.find((i) => i.id === iid).video_url = url || null; },
@@ -219,6 +237,7 @@
   }
 
   const api = DEMO ? demoApi() : realApi();
+  document.documentElement.classList.toggle("large", store.get("triton-font") === "large");
 
   // ---------- 状態 ----------
   const S = {
@@ -227,9 +246,10 @@
     track: "basic", open: { basic: undefined, free: undefined },
     staff: { list: null, filter: "all", q: "" },
     detail: null, busy: false,
+    edit: null, // 書き直し中の記録 { kind: "memo" | "comment", id }
   };
 
-  function trackView(track, checksMap, openLevel) {
+  function trackView(track, checksMap, openLevel, cap = 99) {
     let certCount = 0, selfCount = 0, total = 0, current = null;
     const levels = S.levels.filter((l) => l.track === track).map((l) => {
       const items = S.items.filter((i) => i.track === track && i.level === l.level).map((i) => {
@@ -237,13 +257,14 @@
         const cert = !!(c && c.certified_at);
         const self = !cert && !!(c && c.self_checked_at);
         if (self) selfCount++;
-        return { ...i, cert, self };
+        return { ...i, cert, self, locked: l.level > cap };
       });
       const n = items.filter((i) => i.cert).length;
       certCount += n; total += items.length;
       const cleared = items.length > 0 && n === items.length;
-      if (!cleared && current === null) current = l.level;
-      return { ...l, items, n, cleared };
+      const locked = l.level > cap;
+      if (!cleared && !locked && current === null) current = l.level;
+      return { ...l, items, n, cleared, locked };
     });
     levels.forEach((l) => { l.current = l.level === current; l.open = l.level === (openLevel === undefined ? current : openLevel); });
     return { levels, current, certCount, selfCount, total };
@@ -271,10 +292,11 @@
           <span class="lv-num num" style="background:${esc(l.color)};color:${esc(l.fg)}">${l.level}</span>
           <span class="lv-txt"><b>${esc(l.theme)}</b><small>${esc(l.grade)}</small></span>
           ${l.current ? '<span class="pill now">挑戦中</span>' : ""}
+          ${l.locked ? `<span class="pill staff" style="display:inline-flex;align-items:center;gap:3px">${ICON.lockSm}会員限定</span>` : ""}
           ${l.cleared ? `<span class="done-dot">${ICON.check}</span>` : ""}
           <span class="lv-count">${l.n}/${l.items.length}</span>
         </button>
-        ${l.open ? `<div class="lv-body">${l.items.map((i) => itemRow(i, mode)).join("")}</div>` : ""}
+        ${l.open ? `<div class="lv-body">${l.locked ? `<p class="small muted" style="margin:6px">${mode === "staff" ? "この方のプランでは、このレベルは認定できません。" : "このレベルは会員（スクール・艇庫・レンタル）になると挑戦できます。"}</p>` : ""}${l.items.map((i) => itemRow(i, mode)).join("")}</div>` : ""}
       </div>`).join("");
   }
 
@@ -284,6 +306,9 @@
       : i.self ? `<span class="pill wait">${mode === "staff" ? "本人チェック済み" : "認定待ち"}</span>` : "";
     const video = i.video_url
       ? `<button type="button" class="vid" data-act="video" data-url="${esc(i.video_url)}" aria-label="${esc(i.label)}の動画を見る">${ICON.play}動画</button>` : "";
+    if (i.locked) {
+      return `<div class="item-row"><div class="item locked"><span class="box" style="border-style:dashed"></span><span class="t">${esc(i.label)}</span></div>${video}</div>`;
+    }
     if (mode === "member") {
       return `<div class="item-row"><button type="button" class="item" data-act="self" data-item="${esc(i.id)}" aria-pressed="${i.cert || i.self}"${i.cert ? " disabled" : ""}>${box}<span class="t">${esc(i.label)}</span>${status}</button>${video}</div>`;
     }
@@ -298,11 +323,23 @@
   const legend = `<div class="legend"><span><span class="box self">${ICON.check}</span>自分でチェック</span><span><span class="box cert">${ICON.check}</span>インストラクター認定</span></div>`;
 
   // ---------- 各画面 ----------
+  function lessonCounts(lessons) {
+    const y = todayJST().slice(0, 4);
+    return { total: lessons.length, year: lessons.filter((l) => l.lesson_date.startsWith(y)).length, y };
+  }
+
+  function fontButton() {
+    const large = document.documentElement.classList.contains("large");
+    return `<button type="button" class="fs" data-act="font" aria-pressed="${large}">文字 ${large ? "標準" : "大きめ"}</button>`;
+  }
+
   function viewHome() {
-    const tv = trackView("basic", S.checks);
+    const full = isFull(S.me);
+    const tv = trackView("basic", S.checks, undefined, capOf(S.me, "basic"));
     const cur = tv.levels.find((l) => l.current);
     const month = todayJST().slice(0, 7);
     const monthCount = S.lessons.filter((l) => l.lesson_date.startsWith(month)).length;
+    const cnt = lessonCounts(S.lessons);
     const lastComment = S.lessons.find((l) => l.comment);
     const wing = S.sport === "wing";
     const sportSeg = `<div class="seg">
@@ -315,24 +352,31 @@
           <div><div class="sub">挑戦中 ・ ${esc(cur.grade)}</div><div class="theme">${esc(cur.theme)}</div></div></div>
           <div><div class="between"><span class="sub">レベル${cur.level} クリアまで</span><b>認定 ${cur.n} / ${cur.items.length}</b></div>
           <div class="bar" style="margin-top:6px"><i class="c" style="width:${pct(cur.n, cur.items.length)}"></i></div></div></div>`
-        : `<div class="hero"><div class="theme">全レベル認定済み</div><div class="sub">おめでとうございます！</div></div>`;
+        : full ? `<div class="hero"><div class="theme">全レベル認定済み</div><div class="sub">おめでとうございます！</div></div>`
+        : `<div class="hero"><div class="theme">レベル4まで認定済み</div><div class="sub">ここから先は会員（スクール・艇庫・レンタル）になると挑戦できます。</div></div>`;
       const next = cur ? cur.items.filter((i) => !i.cert) : [];
       body = `
         <div class="card"><div class="between"><h2>次の目標</h2><a href="#/roadmap" style="font-weight:700">ロードマップを見る</a></div>
-          ${next.length ? next.map((i) => `<div class="goal"><span class="box ${i.self ? "self" : ""}" style="width:22px;height:22px">${i.self ? ICON.check : ""}</span><span class="t">${esc(i.label)}</span>${i.self ? '<span class="pill wait">認定待ち</span>' : ""}${i.video_url ? `<button type="button" class="vid" data-act="video" data-url="${esc(i.video_url)}" aria-label="${esc(i.label)}の動画を見る">${ICON.play}動画</button>` : ""}</div>`).join("") : '<p class="muted">すべての項目が認定されています。</p>'}
+          ${!cur && !full ? '<p class="muted">次のレベルは会員限定です。入会についてはスタッフにお声がけください。</p>' : next.length ? next.map((i) => `<div class="goal"><span class="box ${i.self ? "self" : ""}" style="width:22px;height:22px">${i.self ? ICON.check : ""}</span><span class="t">${esc(i.label)}</span>${i.self ? '<span class="pill wait">認定待ち</span>' : ""}${i.video_url ? `<button type="button" class="vid" data-act="video" data-url="${esc(i.video_url)}" aria-label="${esc(i.label)}の動画を見る">${ICON.play}動画</button>` : ""}</div>`).join("") : '<p class="muted">すべての項目が認定されています。</p>'}
         </div>
         <div class="grid2">
-          <div class="card"><div class="stat-label">海に出た回数（累計）</div><div class="stat"><span class="num">${S.lessons.length}</span><span>回</span></div></div>
+          <div class="card"><div class="stat-label">海に出た回数</div>
+            <div class="stat"><span class="num">${cnt.total}</span><span>回</span></div><div class="small muted" style="margin-top:-6px">累計</div>
+            <div class="stat" style="border-top:1px solid var(--line);padding-top:8px"><span class="num" style="font-size:30px">${cnt.year}</span><span>回</span></div><div class="small muted" style="margin-top:-6px">${cnt.y}年</div>
+          </div>
           <div class="card"><div class="stat-label">${Number(month.slice(5))}月の目標</div>
             <div class="stat"><span class="num">${monthCount}</span><span>/ ${S.me.monthly_goal ? S.me.monthly_goal + " 回" : "—"}</span></div>
             <label class="small muted">目標回数 <select class="in" data-change="goal" aria-label="今月の目標回数" style="min-height:36px;padding:4px 8px;width:auto;display:inline-block">
               <option value="">未設定</option>${Array.from({ length: 12 }, (_, k) => k + 1).map((n) => `<option value="${n}"${S.me.monthly_goal === n ? " selected" : ""}>${n}回</option>`).join("")}</select></label>
           </div>
         </div>
-        <div class="card"><div class="between"><h2>認定バッジ</h2><span class="small muted">${BADGES.filter((b) => b.lv < (tv.current ?? 11)).length} / ${BADGES.length} 獲得</span></div>
+        ${full ? `<div class="card"><div class="between"><h2>認定バッジ</h2><span class="small muted">${BADGES.filter((b) => b.lv < (tv.current ?? 11)).length} / ${BADGES.length} 獲得</span></div>
           <div class="badges">${BADGES.map((b) => { const on = b.lv < (tv.current ?? 11);
             return `<div class="badge"><div class="medal num ${on ? "on" : "off"}">${on ? b.lv : ICON.lock}</div><div${on ? ' style="font-weight:700"' : ' class="muted"'}>${b.name}</div></div>`; }).join("")}</div>
-        </div>
+        </div>` : `<div class="card"><div class="between"><h2>認定バッジ</h2><span class="pill staff">会員限定</span></div>
+          <div class="badges" style="opacity:.55">${BADGES.map((b) => `<div class="badge"><div class="medal num off">${ICON.lock}</div><div class="muted">${b.name}</div></div>`).join("")}</div>
+          <p class="small muted">認定バッジは会員（スクール・艇庫・レンタル）の特典です。</p>
+        </div>`}
         ${lastComment ? `<div class="card"><div class="between"><h2>インストラクターから</h2><span class="small muted">${fmtDate(lastComment.lesson_date)}</span></div>
           <p style="white-space:pre-wrap">${esc(lastComment.comment)}</p>${lastComment.instructor_name ? `<span class="small muted">${esc(lastComment.instructor_name)}</span>` : ""}</div>` : ""}`;
     } else {
@@ -342,27 +386,54 @@
         <p class="muted">スキルロードマップを準備しています。<br>公開までしばらくお待ちください。</p>
         <button type="button" class="btn" data-act="sport" data-sport="wind">ウインドサーフィンに戻る</button></div>`;
     }
-    return `<div class="shell"><header class="top"><div class="top-row"><div class="brand">Triton</div><div class="who">${esc(nameOf(S.me))} さん</div></div>${sportSeg}${hero}</header>
+    return `<div class="shell"><header class="top"><div class="top-row"><div class="brand">Triton</div><div class="row" style="flex-wrap:nowrap;min-width:0"><div class="who">${esc(nameOf(S.me))} さん</div>${fontButton()}</div></div>${sportSeg}${hero}</header>
       <main class="main">${body}</main>${nav("home")}</div>`;
   }
 
   function viewRoadmap() {
-    const tv = trackView(S.track, S.checks, S.open[S.track]);
+    const tv = trackView(S.track, S.checks, S.open[S.track], capOf(S.me, S.track));
     return `<div class="shell"><header class="top">
         <div><div class="sub">ウインドサーフィン ・ ${S.track === "basic" ? "基礎・応用編" : "フリースタイル編"}</div><h1>スキルロードマップ</h1></div>
         ${trackTabs()}
         <div><div class="between"><b>認定 ${tv.certCount} / ${tv.total}</b><span class="sub">認定待ち ${tv.selfCount}</span></div>
         <div class="bar" style="margin-top:6px"><i class="c" style="width:${pct(tv.certCount, tv.total)}"></i><i class="s" style="width:${pct(tv.selfCount, tv.total)}"></i></div></div>
       </header>
-      <main class="main">${legend}<p class="small muted" style="margin:0 4px">できるようになった項目をタップすると「自分でチェック」が付きます。インストラクターが確認すると「認定」になります。</p>${levelList(tv, "member")}</main>${nav("roadmap")}</div>`;
+      <main class="main">${legend}<p class="small muted" style="margin:0 4px">できるようになった項目をタップすると「自分でチェック」が付きます。インストラクターが確認すると「認定」になります。</p>
+      ${isFull(S.me) ? "" : `<div class="card" style="background:var(--wait-bg);border-color:#E7C77A;color:var(--wait-fg)"><p class="small">いまのプラン（${esc(S.me.plan || "未設定")}）では、基礎・応用編はレベル4、フリースタイルはレベル3まで使えます。その先は会員（スクール・艇庫・レンタル）になると挑戦できます。</p></div>`}
+      ${levelList(tv, "member")}</main>${nav("roadmap")}</div>`;
+  }
+
+  function lessonBlock(l, who) {
+    // who: "member"（本人が見る） / "staff"（インストラクターが見る）
+    const e = S.edit && S.edit.id === l.id ? S.edit.kind : null;
+    const self = l.source === "self";
+    const head = `<div class="between"><b>${fmtDate(l.lesson_date)}</b>${self ? '<span class="pill staff">自分で記録</span>' : `<span class="meta">${esc(l.instructor_name || "")}</span>`}</div>`;
+    const commentPart = who === "staff" && e === "comment"
+      ? `<label class="f">インストラクターのコメント<textarea class="in" id="edit-text" rows="3" maxlength="1000">${esc(l.comment || "")}</textarea></label>
+         <div class="row"><button type="button" class="btn" style="min-height:40px" data-act="save-comment" data-id="${l.id}">保存</button><button type="button" class="btn ghost" style="min-height:40px" data-act="cancel-edit">やめる</button></div>`
+      : (l.comment ? `<div class="note"><span class="note-l">インストラクター</span><p>${esc(l.comment)}</p></div>` : "")
+        + (who === "staff" ? `<button type="button" class="linkbtn" data-act="edit" data-kind="comment" data-id="${l.id}">${l.comment ? "コメントを直す" : "＋ コメントを書く"}</button>` : "");
+    const memoPart = who === "member" && e === "memo"
+      ? `<label class="f">自分のメモ<textarea class="in" id="edit-text" rows="3" maxlength="1000" placeholder="風や波、うまくいったこと、次にやりたいこと">${esc(l.member_memo || "")}</textarea></label>
+         <div class="row"><button type="button" class="btn" style="min-height:40px" data-act="save-memo" data-id="${l.id}">保存</button><button type="button" class="btn ghost" style="min-height:40px" data-act="cancel-edit">やめる</button></div>`
+      : (l.member_memo ? `<div class="note mine"><span class="note-l">${who === "staff" ? "本人のメモ" : "自分のメモ"}</span><p>${esc(l.member_memo)}</p></div>` : "")
+        + (who === "member" ? `<div class="row"><button type="button" class="linkbtn" data-act="edit" data-kind="memo" data-id="${l.id}">${l.member_memo ? "メモを直す" : "＋ メモを書く"}</button>${self ? `<button type="button" class="linkbtn danger" data-act="del-session" data-id="${l.id}">この記録を消す</button>` : ""}</div>` : "");
+    return `<div class="lesson">${head}${commentPart}${memoPart}</div>`;
   }
 
   function viewHistory() {
-    return `<div class="shell"><header class="top"><div><div class="sub">これまでのレッスン</div><h1>記録</h1></div></header>
-      <main class="main"><div class="card">${S.lessons.length ? S.lessons.map((l) => `<div class="lesson">
-        <div class="between"><b>${fmtDate(l.lesson_date)}</b><span class="meta">${esc(l.instructor_name || "")}</span></div>
-        ${l.comment ? `<p style="white-space:pre-wrap">${esc(l.comment)}</p>` : '<span class="meta">コメントなし</span>'}</div>`).join("")
-        : '<div class="empty">まだ記録はありません。<br>レッスン後にインストラクターが記録します。</div>'}</div></main>${nav("history")}</div>`;
+    const cnt = lessonCounts(S.lessons);
+    return `<div class="shell"><header class="top"><div><div class="sub">海に出た日の記録</div><h1>記録</h1></div>
+        <div class="row" style="gap:16px"><span>累計 <b class="num" style="font-size:24px">${cnt.total}</b> 回</span><span>${cnt.y}年 <b class="num" style="font-size:24px">${cnt.year}</b> 回</span></div></header>
+      <main class="main">
+        <div class="card"><h2>海に出た日を記録</h2>
+          <p class="small muted">レッスン以外の練習の日も、ここで記録できます。</p>
+          <label class="f">日付<input class="in" type="date" id="own-date" value="${todayJST()}" max="${todayJST()}"></label>
+          <label class="f">メモ（任意）<textarea class="in" id="own-memo" rows="2" maxlength="1000" placeholder="風や波、うまくいったこと、次にやりたいこと"></textarea></label>
+          <button type="button" class="btn" data-act="add-session"${S.busy ? " disabled" : ""}>記録する</button>
+        </div>
+        <div class="card">${S.lessons.length ? S.lessons.map((l) => lessonBlock(l, "member")).join("")
+        : '<div class="empty">まだ記録はありません。</div>'}</div></main>${nav("history")}</div>`;
   }
 
   function viewStaffList() {
@@ -373,6 +444,7 @@
       ["all", "すべて", () => true],
       ["wait", "認定待ちあり", (m) => m.waiting_count > 0],
       ["follow", "要フォロー", follow],
+      ["visitor", "非会員", (m) => !isFull(m)],
       ["staff", "スタッフ", (m) => m.role !== "member"],
     ];
     const q = st.q.trim().toLowerCase();
@@ -394,7 +466,7 @@
           const days = daysSince(m.last_lesson_date);
           return `<a class="mrow" href="#/staff/${esc(m.id)}">
             ${m.line_picture_url ? `<img class="avatar" src="${esc(m.line_picture_url)}" alt="">` : '<span class="avatar"></span>'}
-            <span class="nm"><b>${esc(nameOf(m))}</b><small>${m.role !== "member" ? roleLabel[m.role] + " ・ " : ""}${m.lesson_count}回 ・ 最終 ${fmtDate(m.last_lesson_date)}</small></span>
+            <span class="nm"><b>${esc(nameOf(m))}</b><small>${m.role !== "member" ? roleLabel[m.role] : esc(m.plan || "プラン未設定")} ・ ${m.lesson_count}回 ・ 最終 ${fmtDate(m.last_lesson_date)}</small></span>
             ${m.waiting_count > 0 ? `<span class="pill wait">認定待ち ${m.waiting_count}</span>` : ""}
             ${follow(m) ? `<span class="pill warn">${days === null ? "来店記録なし" : days + "日"}</span>` : ""}
             ${lvChip(m)}</a>`; }).join("") : '<div class="empty">該当する会員はいません。</div>'}</div>
@@ -406,15 +478,15 @@
     const d = S.detail;
     if (!d || !d.member) return `<div class="shell"><header class="top"><a class="back" href="#/staff">‹ 会員一覧</a></header><main class="main"><div class="empty">読み込み中…</div></main>${nav("staff")}</div>`;
     const m = d.member;
-    const tv = trackView(S.track, d.checks, S.open[S.track]);
+    const tv = trackView(S.track, d.checks, S.open[S.track], capOf(m, S.track));
     const waiting = S.items.filter((i) => { const c = d.checks.get(i.id); return c && c.self_checked_at && !c.certified_at; })
-      .map((i) => ({ ...i, cert: false, self: true }));
+      .map((i) => ({ ...i, cert: false, self: true, locked: i.level > capOf(m, i.track) }));
     const admin = S.me.role === "admin";
     return `<div class="shell"><header class="top">
         <a class="back" href="#/staff">‹ 会員一覧</a>
         <div class="top-row" style="justify-content:flex-start">
           ${m.line_picture_url ? `<img class="avatar" src="${esc(m.line_picture_url)}" alt="" style="width:48px;height:48px">` : ""}
-          <div><h1>${esc(nameOf(m))}</h1><div class="sub">${roleLabel[m.role]} ・ ${m.sport === "wing" ? "ウイングフォイル" : "ウインドサーフィン"} ・ 累計${d.lessons.length}回 ・ 最終 ${fmtDate(d.lessons[0] && d.lessons[0].lesson_date)}</div></div>
+          <div><h1>${esc(nameOf(m))}</h1><div class="sub">${m.role === "member" ? esc(m.plan || "プラン未設定") : roleLabel[m.role]} ・ ${m.sport === "wing" ? "ウイングフォイル" : "ウインドサーフィン"} ・ 累計${d.lessons.length}回 ・ 最終 ${fmtDate(d.lessons[0] && d.lessons[0].lesson_date)}</div></div>
         </div>
       </header>
       <main class="main">
@@ -431,12 +503,12 @@
           <div class="between"><b>認定 ${tv.certCount} / ${tv.total}</b><span class="small muted">タップで認定／もう一度タップで取り消し</span></div>
         </div>
         ${levelList(tv, "staff")}
-        <div class="card"><h2>レッスン記録</h2>${d.lessons.length ? d.lessons.slice(0, 20).map((l) => `<div class="lesson">
-          <div class="between"><b>${fmtDate(l.lesson_date)}</b><span class="meta">${esc(l.instructor_name || "")}</span></div>
-          ${l.comment ? `<p style="white-space:pre-wrap">${esc(l.comment)}</p>` : '<span class="meta">コメントなし</span>'}</div>`).join("") : '<div class="empty">まだ記録はありません。</div>'}</div>
+        <div class="card"><div class="between"><h2>記録</h2><span class="small muted">累計 ${lessonCounts(d.lessons).total}回 ・ ${lessonCounts(d.lessons).y}年 ${lessonCounts(d.lessons).year}回</span></div>
+          ${d.lessons.length ? d.lessons.slice(0, 30).map((l) => lessonBlock(l, "staff")).join("") : '<div class="empty">まだ記録はありません。</div>'}</div>
         ${admin ? `<div class="card"><h2>会員情報（管理者のみ）</h2>
           <label class="f">表示名（空欄ならLINEの名前：${esc(m.line_name || "")}）<input class="in" id="m-name" maxlength="50" value="${esc(m.display_name || "")}"></label>
-          <label class="f">プラン<input class="in" id="m-plan" maxlength="30" value="${esc(m.plan || "")}" placeholder="例：月会員"></label>
+          <label class="f">プラン<select class="in" id="m-plan"><option value="">未設定</option>${(m.plan && !PLANS.includes(m.plan) ? [m.plan] : []).concat(PLANS).map((pl) => `<option value="${esc(pl)}"${m.plan === pl ? " selected" : ""}>${esc(pl)}</option>`).join("")}</select></label>
+          <p class="small muted" style="margin:-4px 0 0">ビジター・その他・未設定は、基礎編レベル4／フリースタイルレベル3まで、認定バッジなしになります。</p>
           <label class="f">種目<select class="in" id="m-sport"><option value="wind"${m.sport === "wind" ? " selected" : ""}>ウインドサーフィン</option><option value="wing"${m.sport === "wing" ? " selected" : ""}>ウイングフォイル</option></select></label>
           <label class="f">役割<select class="in" id="m-role">${["member", "instructor", "admin"].map((r) => `<option value="${r}"${m.role === r ? " selected" : ""}>${roleLabel[r]}</option>`).join("")}</select></label>
           <button type="button" class="btn ghost" data-act="save-member"${S.busy ? " disabled" : ""}>会員情報を保存</button></div>` : ""}
@@ -484,6 +556,7 @@
 
   async function onRoute() {
     const r = route();
+    S.edit = null;
     window.scrollTo(0, 0);
     if (r === "/staff" && isStaff(S.me)) {
       render();
@@ -510,6 +583,14 @@
     if (a === "sport") { S.sport = el.dataset.sport; store.set("triton-sport", S.sport); return render(); }
     if (a === "track") { S.track = el.dataset.track; return render(); }
     if (a === "filter") { S.staff.filter = el.dataset.filter; return render(); }
+    if (a === "font") {
+      const large = !document.documentElement.classList.contains("large");
+      document.documentElement.classList.toggle("large", large);
+      store.set("triton-font", large ? "large" : "normal");
+      return render();
+    }
+    if (a === "edit") { S.edit = { kind: el.dataset.kind, id: Number(el.dataset.id) }; render(); const t = document.getElementById("edit-text"); if (t) t.focus(); return; }
+    if (a === "cancel-edit") { S.edit = null; return render(); }
     if (a === "video") { try { api.openVideo(el.dataset.url); } catch (e) { console.error(e); toast("動画を開けませんでした"); } return; }
     if (a === "open") {
       const lv = Number(el.dataset.lv);
@@ -538,6 +619,28 @@
         await loadDetail(S.detail.id);
         S.staff.list = null;
         toast("レッスンを記録しました");
+      } else if (a === "add-session") {
+        const date = document.getElementById("own-date").value || null;
+        const memo = document.getElementById("own-memo").value;
+        if (date && date > todayJST()) { toast("今日より先の日付は記録できません"); return; }
+        await api.addOwnSession(date, memo);
+        await loadMine();
+        toast("記録しました");
+      } else if (a === "save-memo") {
+        await api.setMemberMemo(Number(el.dataset.id), document.getElementById("edit-text").value);
+        S.edit = null;
+        await loadMine();
+        toast("メモを保存しました");
+      } else if (a === "del-session") {
+        if (!confirm("この記録を消しますか？")) return;
+        await api.deleteOwnSession(Number(el.dataset.id));
+        await loadMine();
+        toast("記録を消しました");
+      } else if (a === "save-comment") {
+        await api.setLessonComment(Number(el.dataset.id), document.getElementById("edit-text").value);
+        S.edit = null;
+        await loadDetail(S.detail.id);
+        toast("コメントを保存しました");
       } else if (a === "save-video") {
         const id = el.dataset.item;
         const url = document.getElementById("v-" + id).value.trim();
