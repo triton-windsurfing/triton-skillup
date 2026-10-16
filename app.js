@@ -266,7 +266,7 @@
       if (!cleared && !locked && current === null) current = l.level;
       return { ...l, items, n, cleared, locked };
     });
-    levels.forEach((l) => { l.current = l.level === current; l.open = l.level === (openLevel === undefined ? current : openLevel); });
+    levels.forEach((l) => { l.current = l.level === current; l.open = !l.locked && l.level === (openLevel === undefined ? current : openLevel); });
     return { levels, current, certCount, selfCount, total };
   }
   const mapChecks = (rows) => new Map(rows.map((r) => [r.item_id, r]));
@@ -288,14 +288,14 @@
     // mode: "member"（自分でチェック） / "staff"（認定）
     return tv.levels.map((l) => `
       <div class="lv">
-        <button type="button" class="lv-head" data-act="open" data-lv="${l.level}" aria-expanded="${l.open}">
+        ${l.locked ? `<div class="lv-head locked" aria-disabled="true">` : `<button type="button" class="lv-head" data-act="open" data-lv="${l.level}" aria-expanded="${l.open}">`}
           <span class="lv-num num" style="background:${esc(l.color)};color:${esc(l.fg)}">${l.level}</span>
           <span class="lv-txt"><b>${esc(l.theme)}</b><small>${esc(l.grade)}</small></span>
           ${l.current ? '<span class="pill now">挑戦中</span>' : ""}
           ${l.locked ? `<span class="pill staff" style="display:inline-flex;align-items:center;gap:3px">${ICON.lockSm}会員限定</span>` : ""}
           ${l.cleared ? `<span class="done-dot">${ICON.check}</span>` : ""}
-          <span class="lv-count">${l.n}/${l.items.length}</span>
-        </button>
+          ${l.locked ? "" : `<span class="lv-count">${l.n}/${l.items.length}</span>`}
+        ${l.locked ? "</div>" : "</button>"}
         ${l.open ? `<div class="lv-body">${l.locked ? `<p class="small muted" style="margin:6px">${mode === "staff" ? "この方のプランでは、このレベルは認定できません。" : "このレベルは会員（スクール・艇庫・レンタル）になると挑戦できます。"}</p>` : ""}${l.items.map((i) => itemRow(i, mode)).join("")}</div>` : ""}
       </div>`).join("");
   }
