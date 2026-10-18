@@ -150,6 +150,7 @@
       async deleteOwnSession(id) { ok(await sb.rpc("delete_own_session", { p_lesson_id: id })); },
       async setLessonComment(id, comment) { ok(await sb.rpc("set_lesson_comment", { p_lesson_id: id, p_comment: comment })); },
       openVideo(url) { liff.openWindow({ url, external: true }); },
+      openPage(url) { liff.openWindow({ url, external: false }); },
     };
   }
 
@@ -233,6 +234,7 @@
       async updateMember(id, patch) { Object.assign(people.find((p) => p.id === id), patch); },
       async setItemVideo(iid, url) { items.find((i) => i.id === iid).video_url = url || null; },
       openVideo(url) { window.open(url, "_blank", "noopener"); },
+      openPage(url) { window.open(url, "_blank", "noopener"); },
     };
   }
 
@@ -322,6 +324,8 @@
 
   const legend = `<div class="legend"><span><span class="box self">${ICON.check}</span>自分でチェック</span><span><span class="box cert">${ICON.check}</span>インストラクター認定</span></div>`;
 
+  const privacyLink = `<p style="text-align:center;margin:4px 0 0"><button type="button" class="linkbtn" style="color:var(--muted);font-weight:400;text-decoration:underline" data-act="privacy">個人情報の取り扱い</button></p>`;
+
   // ---------- 各画面 ----------
   function lessonCounts(lessons) {
     const y = todayJST().slice(0, 4);
@@ -387,7 +391,7 @@
         <button type="button" class="btn" data-act="sport" data-sport="wind">ウインドサーフィンに戻る</button></div>`;
     }
     return `<div class="shell"><header class="top"><div class="top-row"><div class="brand">Triton</div><div class="row" style="flex-wrap:nowrap;min-width:0"><div class="who">${esc(nameOf(S.me))} さん</div>${fontButton()}</div></div>${sportSeg}${hero}</header>
-      <main class="main">${body}</main>${nav("home")}</div>`;
+      <main class="main">${body}${privacyLink}</main>${nav("home")}</div>`;
   }
 
   function viewRoadmap() {
@@ -433,7 +437,7 @@
           <button type="button" class="btn" data-act="add-session"${S.busy ? " disabled" : ""}>記録する</button>
         </div>
         <div class="card">${S.lessons.length ? S.lessons.map((l) => lessonBlock(l, "member")).join("")
-        : '<div class="empty">まだ記録はありません。</div>'}</div></main>${nav("history")}</div>`;
+        : '<div class="empty">まだ記録はありません。</div>'}</div>${privacyLink}</main>${nav("history")}</div>`;
   }
 
   function viewStaffList() {
@@ -591,6 +595,11 @@
     }
     if (a === "edit") { S.edit = { kind: el.dataset.kind, id: Number(el.dataset.id) }; render(); const t = document.getElementById("edit-text"); if (t) t.focus(); return; }
     if (a === "cancel-edit") { S.edit = null; return render(); }
+    if (a === "privacy") {
+      const url = new URL(location.pathname.includes("/m/") ? "../privacy.html" : "privacy.html", location.href).href;
+      try { api.openPage(url); } catch (e) { location.href = url; }
+      return;
+    }
     if (a === "video") { try { api.openVideo(el.dataset.url); } catch (e) { console.error(e); toast("動画を開けませんでした"); } return; }
     if (a === "open") {
       const lv = Number(el.dataset.lv);
