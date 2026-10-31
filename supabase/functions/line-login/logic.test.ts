@@ -1,7 +1,7 @@
 // 疑似データによるテスト（本番のLINE・Supabaseには一切接続しない）
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { handleLogin, expectedEmail, type Deps, type AuthUser, type MemberRow, type Options } from "./logic.ts";
+import { handleLogin, signupsOpen, readSignupSwitch, expectedEmail, type Deps, type AuthUser, type MemberRow, type Options } from "./logic.ts";
 
 const SUB = "U0123456789abcdef0123456789abcdef";
 const OTHER = "Ufedcba9876543210fedcba9876543210";
@@ -35,8 +35,9 @@ function mkDeps(w: World) {
   };
   return { deps, calls };
 }
-const PRODMODE: Options = { allowedChannelIds: [DEV, PROD], testAdminOnly: false };
-const TESTMODE: Options = { allowedChannelIds: [DEV, PROD], testAdminOnly: true };
+const PRODMODE: Options = { allowedChannelIds: [DEV, PROD], testAdminOnly: false, allowNewSignups: true };
+const PAUSED: Options = { allowedChannelIds: [DEV, PROD], testAdminOnly: false, allowNewSignups: false };
+const TESTMODE: Options = { allowedChannelIds: [DEV, PROD], testAdminOnly: true, allowNewSignups: true };
 const noTokens = (b: Record<string, unknown>) => assert.ok(!("access_token" in b) && !("refresh_token" in b), "トークンを返していないこと");
 
 test("01 既存会員（目印あり・一致）→ 受付、会員表を更新", async () => {
@@ -122,4 +123,49 @@ test("16 [テスト配置] 未登録のLINEユーザー → 拒否（アカウ�
   const { deps, calls } = mkDeps({ member: null });
   const r = await handleLogin(token(DEV), deps, TESTMODE);
   assert.equal(r.status, 403); assert.equal(calls.createUser, undefined); assert.equal(calls.generateLink, undefined);
+});
+
+test("17 [停止中] 既存会員 → これまでどおり受付、会員表も更新", async () => {
+  const { deps, calls } = mkDeps({ member: { id: "u1", role: "member" }, linkUser: marked("u1") });
+  const r = await handleLogin(token(PROD), deps, PAUSED);
+  assert.equal(r.status, 200); assert.equal(r.body.access_token, "AT"); assert.equal(calls.upsertMember.length, 1);
+});
+test("18 [停止中] 新規ユーザー → 403 signup_paused、アカウント作成・確認コード発行・会員表更新なし", async () => {
+  const { deps, calls } = mkDeps({ member: null });
+  const r = await handleLogin(token(PROD), deps, PAUSED);
+  assert.equal(r.status, 403); assert.equal(r.body.error, "signup_paused");
+  assert.equal(calls.createUser, undefined); assert.equal(calls.generateLink, undefined);
+  assert.equal(calls.verifyOtp, undefined); assert.equal(calls.upsertMember, undefined); noTokens(r.body);
+});
+test("19 [停止中] スタッフ（管理者・インストラクター）→ 受付", async () => {
+  for (const role of ["admin", "instructor"]) {
+    const { deps } = mkDeps({ member: { id: "u1", role }, linkUser: marked("u1") });
+    const r = await handleLogin(token(PROD), deps, PAUSED);
+    assert.equal(r.status, 200);
+  }
+});
+test("20 [停止中] 不正なトークン → 401（停止の判定より前に拒否）", async () => {
+  const { deps, calls } = mkDeps({ lineOk: false });
+  const r = await handleLogin(token(PROD), deps, PAUSED);
+  assert.equal(r.status, 401); assert.equal(calls.findMember, undefined);
+});
+test("21 [停止中でも] 目印のないアカウントは従来どおり拒否", async () => {
+  const { deps, calls } = mkDeps({ member: { id: "x", role: "member" }, linkUser: { id: "x", email: expectedEmail(SUB), app_metadata: {} } });
+  const r = await handleLogin(token(PROD), deps, PAUSED);
+  assert.equal(r.status, 403); assert.equal(calls.verifyOtp, undefined);
+});
+test("22 スイッチの値：「open」のときだけ受付、それ以外（未設定・空・誤字など）はすべて停止", () => {
+  for (const v of ["open", " OPEN ", "Open"]) assert.equal(signupsOpen(v), true, v);
+  for (const v of [undefined, null, "", " ", "paused", "stop", "opne", "opened", "true", "1", "受付"]) assert.equal(signupsOpen(v), false, String(v));
+});
+test("23 設定の読み取りに失敗 → 停止（安全側）", () => {
+  assert.equal(readSignupSwitch(() => { throw new Error("read failed"); }), false);
+  assert.equal(readSignupSwitch(() => undefined), false);
+  assert.equal(readSignupSwitch(() => "open"), true);
+});
+test("24 読み取り失敗で停止になっても、既存会員のログインは受付", async () => {
+  const allow = readSignupSwitch(() => { throw new Error("read failed"); });
+  const { deps } = mkDeps({ member: { id: "u1", role: "member" }, linkUser: marked("u1") });
+  const r = await handleLogin(token(PROD), deps, { allowedChannelIds: [DEV, PROD], testAdminOnly: false, allowNewSignups: allow });
+  assert.equal(r.status, 200);
 });

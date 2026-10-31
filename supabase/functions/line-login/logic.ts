@@ -29,7 +29,24 @@ export type Options = {
   allowedChannelIds: string[];
   // true の場合：管理者アカウントだけを受け付け、ログイン状態は発行後すぐ失効させ、会員表も更新しない
   testAdminOnly: boolean;
+  // false の場合：新規登録だけを停止（既存の会員はこれまでどおりログインできる）
+  allowNewSignups: boolean;
 };
+
+// 新規登録の停止スイッチ（Supabaseのシークレット NEW_SIGNUPS）
+// 安全側の設計：値が「open」のときだけ受付。未設定・空・読み取り失敗・それ以外の値はすべて停止
+export function signupsOpen(value: string | undefined | null): boolean {
+  return (value ?? "").trim().toLowerCase() === "open";
+}
+
+// 設定の読み取り自体が失敗した場合も停止（既存会員のログインには影響しない）
+export function readSignupSwitch(get: () => string | undefined | null): boolean {
+  try {
+    return signupsOpen(get());
+  } catch {
+    return false;
+  }
+}
 
 export type Result = { status: number; body: Record<string, unknown> };
 
@@ -75,6 +92,12 @@ export async function handleLogin(idToken: string, deps: Deps, opt: Options): Pr
   if (opt.testAdminOnly && (!member || member.role !== "admin")) {
     deps.log("rejected", { reason: "test_admin_only" });
     return { status: 403, body: { error: "test_admin_only" } };
+  }
+
+  // 3-2. 新規登録の停止中は、会員でない人をここで止める（アカウントは作らない・確認コードも発行しない）
+  if (!member && !opt.allowNewSignups) {
+    deps.log("rejected", { reason: "signup_paused" });
+    return { status: 403, body: { error: "signup_paused" } };
   }
 
   // 4. 会員でなければ、目印付きのアカウントを作成

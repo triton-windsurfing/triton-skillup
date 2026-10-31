@@ -3,7 +3,7 @@
 // 呼び出し元はまだログインしていないので verify_jwt は無効にし、
 // 代わりにLINEの検証APIでIDトークンを必ず確認する。
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { handleLogin, type Deps, type LineIdentity, MARKER_CREATED_BY } from "./logic.ts";
+import { handleLogin, readSignupSwitch, type Deps, type LineIdentity, MARKER_CREATED_BY } from "./logic.ts";
 
 // 本番配置では false（テスト配置 line-login-v2 では true：管理者だけを受け付け、ログイン状態はすぐ失効、会員表は更新しない）
 const TEST_ADMIN_ONLY = false;
@@ -129,7 +129,11 @@ Deno.serve(async (req) => {
   };
 
   try {
-    const r = await handleLogin(idToken, deps, { allowedChannelIds: ALLOWED_CHANNEL_IDS, testAdminOnly: TEST_ADMIN_ONLY });
+    const r = await handleLogin(idToken, deps, {
+      allowedChannelIds: ALLOWED_CHANNEL_IDS,
+      testAdminOnly: TEST_ADMIN_ONLY,
+      allowNewSignups: readSignupSwitch(() => Deno.env.get("NEW_SIGNUPS")),
+    });
     return json(r.body, r.status);
   } catch (e) {
     console.error("unexpected", (e as Error).message);

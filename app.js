@@ -88,6 +88,11 @@
         liff.login({ redirectUri: location.href });
         return new Promise(() => {});
       }
+      if (r.status === 403) {
+        let code = "";
+        try { code = (await r.json()).error; } catch { /* 本文なし */ }
+        if (code === "signup_paused") throw new Error("ただいま新規の受付を一時停止しています。再開まで少しお待ちください。");
+      }
       if (!r.ok) throw new Error(`ログインできませんでした（${r.status}）。`);
       sessionStorage.removeItem(loginOnce);
       const t = await r.json();
