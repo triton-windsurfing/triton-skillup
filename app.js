@@ -30,6 +30,9 @@
   };
   const sportOf = (k) => SPORTS[k] || SPORTS.wind;
   const mainTrack = (k) => sportOf(k).tracks[0][0];
+  // 会員の種目：wind / wing / both（両方）
+  const SPORT_LABEL = { wind: "ウインドサーフィン", wing: "ウイングフォイル", both: "ウインド・ウイング" };
+  const baseSport = (k) => (k === "wing" ? "wing" : "wind");
   const trackName = (k, track) => (sportOf(k).tracks.find((t) => t[0] === track) || [, ""])[1];
 
   // ---------- 小さな道具 ----------
@@ -207,7 +210,7 @@
         ? { id: "d1", line_name: "お試し ビジター", display_name: null, role: "member", sport: "wind", plan: "ビジター", monthly_goal: 4, line_picture_url: null }
         : { id: "d1", line_name: "お試し 管理者", display_name: null, role: "admin", sport: "wind", plan: null, monthly_goal: 4, line_picture_url: null },
       { id: "d2", line_name: "海野 ナギサ", display_name: null, role: "member", sport: "wind", plan: "スクール会員", monthly_goal: 4, line_picture_url: null },
-      { id: "d3", line_name: "浜田 ケン", display_name: null, role: "member", sport: "wind", plan: "ビジター", monthly_goal: null, line_picture_url: null },
+      { id: "d3", line_name: "浜田 ケン", display_name: null, role: "member", sport: "both", plan: "ビジター", monthly_goal: null, line_picture_url: null },
     ];
     const checks = [];
     const certAll = (mid, ids) => ids.forEach((id) => checks.push({ member_id: mid, item_id: id, self_checked_at: now, certified_at: now, certified_by: "d1" }));
@@ -235,10 +238,10 @@
         return people.map((p) => {
           const ls = lessons.filter((l) => l.member_id === p.id);
           const cert = new Set(checks.filter((c) => c.member_id === p.id && c.certified_at).map((c) => c.item_id));
-          const open = items.filter((i) => i.track === mainTrack(p.sport) && !cert.has(i.id)).map((i) => i.level);
+          const openOf = (tr) => { const o = items.filter((i) => i.track === tr && !cert.has(i.id)).map((i) => i.level); return o.length ? Math.min(...o) : 11; };
           return { ...p, lesson_count: ls.length, last_lesson_date: ls.map((l) => l.lesson_date).sort().pop() || null,
             waiting_count: checks.filter((c) => c.member_id === p.id && c.self_checked_at && !c.certified_at).length,
-            current_level: open.length ? Math.min(...open) : 11 };
+            current_level: openOf(mainTrack(p.sport)), wing_level: openOf("wing") };
         });
       },
       async toggleSelf(iid) {
@@ -508,9 +511,13 @@
     const f = filters.find((x) => x[0] === st.filter)[2];
     const rows = st.list.filter((m) => f(m) && (!q || nameOf(m).toLowerCase().includes(q)))
       .sort((a, b) => (b.waiting_count - a.waiting_count) || String(b.last_lesson_date || "").localeCompare(String(a.last_lesson_date || "")));
+    const chip = (track, lv, prefix = "") => {
+      const l = S.levels.find((x) => x.track === track && x.level === lv);
+      return l ? `<span class="lvchip" style="background:${esc(l.color)};color:${esc(l.fg)}">${prefix}Lv${l.level}</span>` : `<span class="lvchip pill ok">${prefix}全認定</span>`;
+    };
     const lvChip = (m) => {
-      const l = S.levels.find((x) => x.track === mainTrack(m.sport) && x.level === m.current_level);
-      return l ? `<span class="lvchip" style="background:${esc(l.color)};color:${esc(l.fg)}">Lv${l.level}</span>` : `<span class="lvchip pill ok">全認定</span>`;
+      if (m.sport === "both") return `<span style="display:flex;flex-direction:column;gap:3px;align-items:flex-end">${chip("basic", m.current_level, "ウインド ")}${chip("wing", m.wing_level, "ウイング ")}</span>`;
+      return chip(mainTrack(m.sport), m.current_level);
     };
     return `<div class="shell wide"><header class="top"><div class="top-row"><h1>会員一覧</h1><span class="sub">${st.list.length}人</span></div>
         ${S.me.role === "admin" ? '<a class="back" href="#/videos" style="align-self:flex-start">動画リンクの設定 ›</a>' : ""}
@@ -534,7 +541,9 @@
     const d = S.detail;
     if (!d || !d.member) return `<div class="shell"><header class="top"><a class="back" href="#/staff">‹ 会員一覧</a></header><main class="main"><div class="empty">読み込み中…</div></main>${nav("staff")}</div>`;
     const m = d.member;
-    const dsport = S.dsport || m.sport || "wind";
+    const dsport = S.dsport || baseSport(m.sport);
+    // 両方の会員は直前のレッスンと同じ種目、それ以外は会員の種目を最初に選んでおく
+    const lsport = m.sport === "both" ? ((d.lessons.find((l) => l.sport) || {}).sport || "wind") : baseSport(m.sport);
     const track = trackFor(dsport);
     const tv = trackView(track, d.checks, S.open[track], capOf(m, track));
     const waiting = S.items.filter((i) => { const c = d.checks.get(i.id); return c && c.self_checked_at && !c.certified_at; })
@@ -544,7 +553,7 @@
         <a class="back" href="#/staff">‹ 会員一覧</a>
         <div class="top-row" style="justify-content:flex-start">
           ${m.line_picture_url ? `<img class="avatar" src="${esc(m.line_picture_url)}" alt="" style="width:48px;height:48px">` : ""}
-          <div><h1>${esc(nameOf(m))}</h1><div class="sub">${m.role === "member" ? esc(m.plan || "プラン未設定") : roleLabel[m.role]} ・ ${m.sport === "wing" ? "ウイングフォイル" : "ウインドサーフィン"} ・ 累計${d.lessons.length}回 ・ 最終 ${fmtDate(d.lessons[0] && d.lessons[0].lesson_date)}</div></div>
+          <div><h1>${esc(nameOf(m))}</h1><div class="sub">${m.role === "member" ? esc(m.plan || "プラン未設定") : roleLabel[m.role]} ・ ${SPORT_LABEL[m.sport] || SPORT_LABEL.wind} ・ 累計${d.lessons.length}回 ・ 最終 ${fmtDate(d.lessons[0] && d.lessons[0].lesson_date)}</div></div>
         </div>
       </header>
       <main class="main">
@@ -552,7 +561,7 @@
           <p class="small muted">確認できたらタップして認定します。</p>${waiting.map((i) => itemRow(i, "staff")).join("")}</div>` : ""}
         <div class="card"><h2>レッスンを記録</h2>
           <label class="f">日付<input class="in" type="date" id="lesson-date" value="${todayJST()}"></label>
-          <label class="f">種目<select class="in" id="lesson-sport">${Object.entries(SPORTS).map(([k, v]) => `<option value="${k}"${(m.sport || "wind") === k ? " selected" : ""}>${v.name}</option>`).join("")}</select></label>
+          <label class="f">種目<select class="in" id="lesson-sport">${Object.entries(SPORTS).map(([k, v]) => `<option value="${k}"${lsport === k ? " selected" : ""}>${v.name}</option>`).join("")}</select></label>
           <label class="f">ひとことコメント（会員に表示）<textarea class="in" id="lesson-comment" rows="3" maxlength="1000" placeholder="今日よかった点と、次に挑戦すること"></textarea></label>
           <button type="button" class="btn" data-act="lesson"${S.busy ? " disabled" : ""}>記録を保存</button>
         </div>
@@ -568,7 +577,7 @@
           <label class="f">表示名（空欄ならLINEの名前：${esc(m.line_name || "")}）<input class="in" id="m-name" maxlength="50" value="${esc(m.display_name || "")}"></label>
           <label class="f">プラン<select class="in" id="m-plan"><option value="">未設定</option>${(m.plan && !PLANS.includes(m.plan) ? [m.plan] : []).concat(PLANS).map((pl) => `<option value="${esc(pl)}"${m.plan === pl ? " selected" : ""}>${esc(pl)}</option>`).join("")}</select></label>
           <p class="small muted" style="margin:-4px 0 0">ビジター・その他・未設定は、ウインド基礎・応用レベル4／フリースタイルレベル3、ウイング基礎・応用レベル3まで、認定バッジなしになります。</p>
-          <label class="f">種目<select class="in" id="m-sport"><option value="wind"${m.sport === "wind" ? " selected" : ""}>ウインドサーフィン</option><option value="wing"${m.sport === "wing" ? " selected" : ""}>ウイングフォイル</option></select></label>
+          <label class="f">種目<select class="in" id="m-sport">${Object.entries(SPORT_LABEL).map(([k, v]) => `<option value="${k}"${(m.sport || "wind") === k ? " selected" : ""}>${k === "both" ? "両方（ウインド・ウイング）" : v}</option>`).join("")}</select></label>
           <label class="f">役割<select class="in" id="m-role">${["member", "instructor", "admin"].map((r) => `<option value="${r}"${m.role === r ? " selected" : ""}>${roleLabel[r]}</option>`).join("")}</select></label>
           <button type="button" class="btn ghost" data-act="save-member"${S.busy ? " disabled" : ""}>会員情報を保存</button></div>` : ""}
       </main>${nav("staff")}</div>`;
@@ -771,6 +780,7 @@
   // ---------- 起動 ----------
   (async () => {
     S.me = await api.boot();
+    if (!store.get("triton-sport") && S.me.sport === "wing") S.sport = "wing";
     const cat = await api.catalog();
     S.levels = cat.levels;
     S.items = cat.items;
