@@ -163,7 +163,19 @@
           .order("lesson_date", { ascending: false }).order("id", { ascending: false }).limit(2000));
       },
       async member(id) { return ok(await sb.from("members").select("*").eq("id", id).single()); },
-      async overview() { return ok(await sb.from("member_overview").select("*")); },
+      async overview() {
+        // 認定済みの項目も一緒に読み、会員一覧で種目ごとのLvを出す（1000件ずつ全件）
+        const certs = [];
+        for (let from = 0; ; from += 1000) {
+          const rows = ok(await sb.from("skill_checks").select("member_id,item_id")
+            .not("certified_at", "is", null).order("member_id").order("item_id").range(from, from + 999));
+          certs.push(...rows);
+          if (rows.length < 1000) break;
+        }
+        const by = new Map();
+        certs.forEach((c) => { if (!by.has(c.member_id)) by.set(c.member_id, []); by.get(c.member_id).push(c.item_id); });
+        return ok(await sb.from("member_overview").select("*")).map((m) => ({ ...m, certified: by.get(m.id) || [] }));
+      },
       async toggleSelf(itemId) { ok(await sb.rpc("toggle_self_check", { p_item_id: itemId })); },
       async setCertified(memberId, itemId, value) { ok(await sb.rpc("set_certified", { p_member_id: memberId, p_item_id: itemId, p_value: value })); },
       async recordLesson(memberId, comment, date, sport) { ok(await sb.rpc("record_lesson", { p_member_id: memberId, p_comment: comment, p_date: date, p_sport: sport })); },
@@ -241,7 +253,7 @@
           const openOf = (tr) => { const o = items.filter((i) => i.track === tr && !cert.has(i.id)).map((i) => i.level); return o.length ? Math.min(...o) : 11; };
           return { ...p, lesson_count: ls.length, last_lesson_date: ls.map((l) => l.lesson_date).sort().pop() || null,
             waiting_count: checks.filter((c) => c.member_id === p.id && c.self_checked_at && !c.certified_at).length,
-            current_level: openOf(mainTrack(p.sport)), wing_level: openOf("wing") };
+            current_level: openOf(mainTrack(p.sport)), wing_level: openOf("wing"), certified: [...cert] };
         });
       },
       async toggleSelf(iid) {
@@ -515,9 +527,16 @@
       const l = S.levels.find((x) => x.track === track && x.level === lv);
       return l ? `<span class="lvchip" style="background:${esc(l.color)};color:${esc(l.fg)}">${prefix}Lv${l.level}</span>` : `<span class="lvchip pill ok">${prefix}全認定</span>`;
     };
+    // 種目の設定に加えて、その種目の項目が1つでも認定されていればLvを出す（両方なら2つ並べる）
     const lvChip = (m) => {
-      if (m.sport === "both") return `<span style="display:flex;flex-direction:column;gap:3px;align-items:flex-end">${chip("basic", m.current_level, "ウインド ")}${chip("wing", m.wing_level, "ウイング ")}</span>`;
-      return chip(mainTrack(m.sport), m.current_level);
+      const cert = new Set(m.certified || []);
+      const trackOfItem = new Map(S.items.map((i) => [i.id, i.track]));
+      const has = (tracks) => [...cert].some((id) => tracks.includes(trackOfItem.get(id)));
+      const levelOf = (track) => { const o = S.items.filter((i) => i.track === track && !cert.has(i.id)).map((i) => i.level); return o.length ? Math.min(...o) : 11; };
+      const wind = m.sport !== "wing" || has(["basic", "free"]);
+      const wing = m.sport === "wing" || m.sport === "both" || has(["wing", "wingfree"]);
+      if (wind && wing) return `${chip("basic", levelOf("basic"), "ウインド ")}${chip("wing", levelOf("wing"), "ウイング ")}`;
+      return wing ? chip("wing", levelOf("wing")) : chip("basic", levelOf("basic"));
     };
     return `<div class="shell wide"><header class="top"><div class="top-row"><h1>会員一覧</h1><span class="sub">${st.list.length}人</span></div>
         ${S.me.role === "admin" ? '<a class="back" href="#/videos" style="align-self:flex-start">動画リンクの設定 ›</a>' : ""}
@@ -530,9 +549,10 @@
           return `<a class="mrow" href="#/staff/${esc(m.id)}">
             ${m.line_picture_url ? `<img class="avatar" src="${esc(m.line_picture_url)}" alt="">` : '<span class="avatar"></span>'}
             <span class="nm"><b>${esc(nameOf(m))}</b><small>${m.role !== "member" ? roleLabel[m.role] : esc(m.plan || "プラン未設定")} ・ ${m.lesson_count}回 ・ 最終 ${fmtDate(m.last_lesson_date)}</small></span>
+            <span style="display:flex;flex-wrap:wrap;gap:4px;justify-content:flex-end;align-items:center;max-width:58%">
             ${m.waiting_count > 0 ? `<span class="pill wait">認定待ち ${m.waiting_count}</span>` : ""}
             ${follow(m) ? `<span class="pill warn">${days === null ? "来店記録なし" : days + "日"}</span>` : ""}
-            ${lvChip(m)}</a>`; }).join("") : '<div class="empty">該当する会員はいません。</div>'}</div>
+            ${lvChip(m)}</span></a>`; }).join("") : '<div class="empty">該当する会員はいません。</div>'}</div>
         <p class="small muted" style="margin:0">「要フォロー」は最終レッスンから30日以上あいた会員です。会員がLINEでアプリを開くと、ここに追加されます。</p>
       </main>${nav("staff")}</div>`;
   }
