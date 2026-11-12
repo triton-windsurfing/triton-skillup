@@ -9,13 +9,28 @@
   const DEMO = new URLSearchParams(location.search).has("demo");
   const VISITOR = DEMO && new URLSearchParams(location.search).has("visitor"); // お試し表示でビジターの見え方を確認する
   const $app = document.getElementById("app");
-  const BADGES = [
-    { lv: 3, name: "初級<br>卒業" },
-    { lv: 5, name: "中級<br>認定" },
-    { lv: 7, name: "上級<br>認定" },
-    { lv: 9, name: "エキスパート<br>認定" },
-    { lv: 10, name: "プロ<br>認定" },
-  ];
+  // 種目ごとの認定バッジ（そのレベルを全項目認定で獲得）
+  const BADGES = {
+    wind: [
+      { lv: 3, name: "初級<br>卒業" },
+      { lv: 5, name: "中級<br>認定" },
+      { lv: 7, name: "上級<br>認定" },
+      { lv: 9, name: "エキスパート<br>認定" },
+      { lv: 10, name: "プロ<br>認定" },
+    ],
+    wing: [
+      { lv: 3, name: "初心者<br>卒業" },
+      { lv: 5, name: "中級<br>認定" },
+    ],
+  };
+  // 種目ごとのロードマップ（[track, タブ名]）。先頭がメイン（ホームの「挑戦中」に使う）
+  const SPORTS = {
+    wind: { name: "ウインドサーフィン", tracks: [["basic", "基礎・応用"], ["free", "フリースタイル"]] },
+    wing: { name: "ウイングフォイル", tracks: [["wing", "基礎・応用"]] },
+  };
+  const sportOf = (k) => SPORTS[k] || SPORTS.wind;
+  const mainTrack = (k) => sportOf(k).tracks[0][0];
+  const trackName = (k, track) => (sportOf(k).tracks.find((t) => t[0] === track) || [, ""])[1];
 
   // ---------- 小さな道具 ----------
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -32,9 +47,11 @@
   const isStaff = (m) => m && (m.role === "instructor" || m.role === "admin");
   const PLANS = ["スクール会員", "艇庫会員", "レンタル会員", "ビジター", "その他"];
   const MEMBER_PLANS = ["スクール会員", "艇庫会員", "レンタル会員"];
-  // 会員（スクール・艇庫・レンタル）とスタッフは制限なし。ビジター・その他・未設定は基礎4／フリースタイル3まで
+  // 会員（スクール・艇庫・レンタル）とスタッフは制限なし。ビジター・その他・未設定は
+  // ウインド基礎4／ウインドフリースタイル3／ウイング基礎3まで（DBの level_cap と同じ値にする）
   const isFull = (m) => !!m && (isStaff(m) || MEMBER_PLANS.includes(m.plan));
-  const capOf = (m, track) => (isFull(m) ? 99 : track === "basic" ? 4 : 3);
+  const VISITOR_CAP = { basic: 4, free: 3, wing: 3 };
+  const capOf = (m, track) => (isFull(m) ? 99 : VISITOR_CAP[track] ?? 0);
   const store = {
     get(k) { try { return localStorage.getItem(k); } catch { return null; } },
     set(k, v) { try { localStorage.setItem(k, v); } catch { /* 保存できなくても動く */ } },
@@ -162,7 +179,7 @@
   // ---------- データの出し入れ（お試し表示：保存しない） ----------
   function demoApi() {
     const L = [
-      ["basic",1,"超初心者","まずは風を感じる","#2E7D32","#FFFFFF",["ダガー付きボードで風上へ行ける","方向転換（タック）ができる","ランニングで走れる","ラフ／ベア"]],
+      ["basic",1,"スタート","まずは風を感じる","#2E7D32","#FFFFFF",["ダガー付きボードで風上へ行ける","方向転換（タック）ができる","ランニングで走れる","ラフ／ベア"]],
       ["basic",2,"初心者","操作に慣れる","#8BC34A","#14263A",["ショートボードで風上へ行ける","タックができる","ジャイブができる"]],
       ["basic",3,"初級","ウィンドらしくなる","#F2C230","#14263A",["ビーチスタートができる","道具のセッティングができる","ハーネスをかけて走れる"]],
       ["basic",4,"初級〜中級","安定して乗れる","#F2A31B","#14263A",["中風域で風上へ行ける","ハーネスをかけて片手で走行","片足を水に浸けて走行"]],
@@ -175,6 +192,11 @@
       ["free",1,"入門トリック","フリースタイル Lv1","#2E7D32","#FFFFFF",["ヘリタック","セイル360","クリューファーストセイリング","ピボットジャイブ"]],
       ["free",2,"トリック","フリースタイル Lv2","#8BC34A","#14263A",["アップウインド360","プッシュタック","NPダックジャイブ","リワォード"]],
       ["free",3,"トリック","フリースタイル Lv3","#F2C230","#14263A",["クリューファーストヘリタック","テールファースト","セイルボディ360","ベンダー（風下回りの360）","ボード360（風上回り）"]],
+      ["wing",1,"スタート","安全に戻ってこられる","#2E7D32","#FFFFFF",["スタート地点に戻ってくる"]],
+      ["wing",2,"風を理解する","風上へ進む","#8BC34A","#14263A",["タクシー走行で風上へ行く（フォイリングしない状態）"]],
+      ["wing",3,"初心者","フォイルで浮く","#F2C230","#14263A",["50m以上フォイリングできる"]],
+      ["wing",4,"初級〜中級","ジャイブで向きを変える","#F2A31B","#14263A",["トゥサイドジャイブ","ヒールサイドジャイブ"]],
+      ["wing",5,"中級","タックで向きを変える","#EE7B30","#14263A",["トゥサイドタック","ヒールサイドタック"]],
     ];
     const levels = L.map(([track, level, grade, theme, color, fg]) => ({ track, level, grade, theme, color, fg }));
     const items = L.flatMap(([track, level, , , , , labels]) => labels.map((label, i) => ({ id: `${track}-${level}-${i}`, track, level, position: i, label, video_url: null })));
@@ -213,7 +235,7 @@
         return people.map((p) => {
           const ls = lessons.filter((l) => l.member_id === p.id);
           const cert = new Set(checks.filter((c) => c.member_id === p.id && c.certified_at).map((c) => c.item_id));
-          const open = items.filter((i) => i.track === "basic" && !cert.has(i.id)).map((i) => i.level);
+          const open = items.filter((i) => i.track === mainTrack(p.sport) && !cert.has(i.id)).map((i) => i.level);
           return { ...p, lesson_count: ls.length, last_lesson_date: ls.map((l) => l.lesson_date).sort().pop() || null,
             waiting_count: checks.filter((c) => c.member_id === p.id && c.self_checked_at && !c.certified_at).length,
             current_level: open.length ? Math.min(...open) : 11 };
@@ -250,7 +272,8 @@
   const S = {
     me: null, levels: [], items: [], checks: new Map(), lessons: [],
     sport: store.get("triton-sport") || "wind",
-    track: "basic", open: { basic: undefined, free: undefined },
+    track: "basic", open: {},
+    dsport: null, // スタッフの会員詳細で見ている種目
     staff: { list: null, filter: "all", q: "" },
     detail: null, busy: false,
     edit: null, // 書き直し中の記録 { kind: "memo" | "comment", id }
@@ -322,9 +345,23 @@
     return `<div class="item-row"><button type="button" class="item" data-act="cert" data-item="${esc(i.id)}" data-val="${!i.cert}" aria-pressed="${i.cert}">${box}<span class="t">${esc(i.label)}</span>${status}</button>${video}</div>`;
   }
 
-  function trackTabs() {
-    return `<div class="seg">${[["basic", "基礎・応用"], ["free", "フリースタイル"]].map(([id, label]) =>
-      `<button type="button" data-act="track" data-track="${id}" aria-pressed="${S.track === id}">${label}</button>`).join("")}</div>`;
+  // 今の種目にない track が選ばれていたら、その種目のメインに戻す
+  function trackFor(sport) {
+    const ts = sportOf(sport).tracks.map((t) => t[0]);
+    if (!ts.includes(S.track)) S.track = ts[0];
+    return S.track;
+  }
+
+  function trackTabs(sport, light) {
+    const ts = sportOf(sport).tracks;
+    if (ts.length < 2) return "";
+    return `<div class="seg"${light ? ' style="background:#E4EAF0"' : ""}>${ts.map(([id, label]) =>
+      `<button type="button" data-act="track" data-track="${id}" aria-pressed="${S.track === id}"${light ? ' style="color:var(--ink)"' : ""}>${label}</button>`).join("")}</div>`;
+  }
+
+  function sportSeg(sport, act = "sport", light) {
+    return `<div class="seg"${light ? ' style="background:#E4EAF0"' : ""}>${Object.entries(SPORTS).map(([k, v]) =>
+      `<button type="button" data-act="${act}" data-sport="${k}" aria-pressed="${sport === k}"${light ? ' style="color:var(--ink)"' : ""}>${v.name}</button>`).join("")}</div>`;
   }
 
   const legend = `<div class="legend"><span><span class="box self">${ICON.check}</span>自分でチェック</span><span><span class="box cert">${ICON.check}</span>インストラクター認定</span></div>`;
@@ -344,25 +381,24 @@
 
   function viewHome() {
     const full = isFull(S.me);
-    const tv = trackView("basic", S.checks, undefined, capOf(S.me, "basic"));
+    const main = mainTrack(S.sport);
+    const cap = capOf(S.me, main);
+    const badges = BADGES[S.sport] || [];
+    const tv = trackView(main, S.checks, undefined, cap);
     const cur = tv.levels.find((l) => l.current);
     const month = todayJST().slice(0, 7);
     const monthCount = S.lessons.filter((l) => l.lesson_date.startsWith(month)).length;
     const cnt = lessonCounts(S.lessons);
     const lastComment = S.lessons.find((l) => l.comment);
-    const wing = S.sport === "wing";
-    const sportSeg = `<div class="seg">
-      <button type="button" data-act="sport" data-sport="wind" aria-pressed="${!wing}">ウインドサーフィン</button>
-      <button type="button" data-act="sport" data-sport="wing" aria-pressed="${wing}"><span>ウイングフォイル</span><span class="tag">製作中</span></button></div>`;
     let hero = "", body = "";
-    if (!wing) {
+    {
       hero = cur ? `<div class="hero">
           <div class="hero-row"><div class="lvbig num" style="background:${esc(cur.color)};color:${esc(cur.fg)}">${cur.level}</div>
           <div><div class="sub">挑戦中 ・ ${esc(cur.grade)}</div><div class="theme">${esc(cur.theme)}</div></div></div>
           <div><div class="between"><span class="sub">レベル${cur.level} クリアまで</span><b>認定 ${cur.n} / ${cur.items.length}</b></div>
           <div class="bar" style="margin-top:6px"><i class="c" style="width:${pct(cur.n, cur.items.length)}"></i></div></div></div>`
         : full ? `<div class="hero"><div class="theme">全レベル認定済み</div><div class="sub">おめでとうございます！</div></div>`
-        : `<div class="hero"><div class="theme">レベル4まで認定済み</div><div class="sub">ここから先は会員（スクール・艇庫・レンタル）になると挑戦できます。</div></div>`;
+        : `<div class="hero"><div class="theme">レベル${cap}まで認定済み</div><div class="sub">ここから先は会員（スクール・艇庫・レンタル）になると挑戦できます。</div></div>`;
       const next = cur ? cur.items.filter((i) => !i.cert) : [];
       body = `
         <div class="card"><div class="between"><h2>次の目標</h2><a href="#/roadmap" style="font-weight:700">ロードマップを見る</a></div>
@@ -379,36 +415,33 @@
               <option value="">未設定</option>${Array.from({ length: 12 }, (_, k) => k + 1).map((n) => `<option value="${n}"${S.me.monthly_goal === n ? " selected" : ""}>${n}回</option>`).join("")}</select></label>
           </div>
         </div>
-        ${full ? `<div class="card"><div class="between"><h2>認定バッジ</h2><span class="small muted">${BADGES.filter((b) => b.lv < (tv.current ?? 11)).length} / ${BADGES.length} 獲得</span></div>
-          <div class="badges">${BADGES.map((b) => { const on = b.lv < (tv.current ?? 11);
+        ${full ? `<div class="card"><div class="between"><h2>認定バッジ</h2><span class="small muted">${badges.filter((b) => b.lv < (tv.current ?? 11)).length} / ${badges.length} 獲得</span></div>
+          <div class="badges">${badges.map((b) => { const on = b.lv < (tv.current ?? 11);
             return `<div class="badge"><div class="medal num ${on ? "on" : "off"}">${on ? b.lv : ICON.lock}</div><div${on ? ' style="font-weight:700"' : ' class="muted"'}>${b.name}</div></div>`; }).join("")}</div>
         </div>` : `<div class="card"><div class="between"><h2>認定バッジ</h2><span class="pill staff">会員限定</span></div>
-          <div class="badges" style="opacity:.55">${BADGES.map((b) => `<div class="badge"><div class="medal num off">${ICON.lock}</div><div class="muted">${b.name}</div></div>`).join("")}</div>
+          <div class="badges" style="opacity:.55">${badges.map((b) => `<div class="badge"><div class="medal num off">${ICON.lock}</div><div class="muted">${b.name}</div></div>`).join("")}</div>
           <p class="small muted">認定バッジは会員（スクール・艇庫・レンタル）の特典です。</p>
         </div>`}
         ${lastComment ? `<div class="card"><div class="between"><h2>インストラクターから</h2><span class="small muted">${fmtDate(lastComment.lesson_date)}</span></div>
           <p style="white-space:pre-wrap">${esc(lastComment.comment)}</p>${lastComment.instructor_name ? `<span class="small muted">${esc(lastComment.instructor_name)}</span>` : ""}</div>` : ""}`;
-    } else {
-      body = `<div class="card" style="align-items:center;text-align:center;padding:32px 20px;gap:12px">
-        <div style="width:56px;height:56px;border-radius:50%;background:var(--wait-bg);color:var(--wait-fg);display:flex;align-items:center;justify-content:center">${ICON.tool}</div>
-        <h2 style="font-size:18px">ウイングフォイルは製作中です</h2>
-        <p class="muted">スキルロードマップを準備しています。<br>公開までしばらくお待ちください。</p>
-        <button type="button" class="btn" data-act="sport" data-sport="wind">ウインドサーフィンに戻る</button></div>`;
     }
-    return `<div class="shell"><header class="top"><div class="top-row"><div class="brand">Triton</div><div class="row" style="flex-wrap:nowrap;min-width:0"><div class="who">${esc(nameOf(S.me))} さん</div>${fontButton()}</div></div>${sportSeg}${hero}</header>
+    return `<div class="shell"><header class="top"><div class="top-row"><div class="brand">Triton</div><div class="row" style="flex-wrap:nowrap;min-width:0"><div class="who">${esc(nameOf(S.me))} さん</div>${fontButton()}</div></div>${sportSeg(S.sport)}${hero}</header>
       <main class="main">${body}${privacyLink}</main>${nav("home")}</div>`;
   }
 
   function viewRoadmap() {
-    const tv = trackView(S.track, S.checks, S.open[S.track], capOf(S.me, S.track));
+    const track = trackFor(S.sport);
+    const tv = trackView(track, S.checks, S.open[track], capOf(S.me, track));
+    const capText = sportOf(S.sport).tracks.map(([t, label]) => `${label}${t === "free" ? "" : "編"}はレベル${capOf(S.me, t)}`).join("、");
     return `<div class="shell"><header class="top">
-        <div><div class="sub">ウインドサーフィン ・ ${S.track === "basic" ? "基礎・応用編" : "フリースタイル編"}</div><h1>スキルロードマップ</h1></div>
-        ${trackTabs()}
+        ${sportSeg(S.sport)}
+        <div><div class="sub">${sportOf(S.sport).name} ・ ${trackName(S.sport, track)}${track === "free" ? "" : "編"}</div><h1>スキルロードマップ</h1></div>
+        ${trackTabs(S.sport)}
         <div><div class="between"><b>認定 ${tv.certCount} / ${tv.total}</b><span class="sub">認定待ち ${tv.selfCount}</span></div>
         <div class="bar" style="margin-top:6px"><i class="c" style="width:${pct(tv.certCount, tv.total)}"></i><i class="s" style="width:${pct(tv.selfCount, tv.total)}"></i></div></div>
       </header>
       <main class="main">${legend}<p class="small muted" style="margin:0 4px">できるようになった項目をタップすると「自分でチェック」が付きます。インストラクターが確認すると「認定」になります。</p>
-      ${isFull(S.me) ? "" : `<div class="card" style="background:var(--wait-bg);border-color:#E7C77A;color:var(--wait-fg)"><p class="small">いまのプラン（${esc(S.me.plan || "未設定")}）では、基礎・応用編はレベル4、フリースタイルはレベル3まで使えます。その先は会員（スクール・艇庫・レンタル）になると挑戦できます。</p></div>`}
+      ${isFull(S.me) ? "" : `<div class="card" style="background:var(--wait-bg);border-color:#E7C77A;color:var(--wait-fg)"><p class="small">いまのプラン（${esc(S.me.plan || "未設定")}）では、${capText}まで使えます。その先は会員（スクール・艇庫・レンタル）になると挑戦できます。</p></div>`}
       ${levelList(tv, "member")}</main>${nav("roadmap")}</div>`;
   }
 
@@ -461,8 +494,7 @@
     const rows = st.list.filter((m) => f(m) && (!q || nameOf(m).toLowerCase().includes(q)))
       .sort((a, b) => (b.waiting_count - a.waiting_count) || String(b.last_lesson_date || "").localeCompare(String(a.last_lesson_date || "")));
     const lvChip = (m) => {
-      if (m.sport === "wing") return `<span class="lvchip" style="background:#E4EAF0">製作中</span>`;
-      const l = S.levels.find((x) => x.track === "basic" && x.level === m.current_level);
+      const l = S.levels.find((x) => x.track === mainTrack(m.sport) && x.level === m.current_level);
       return l ? `<span class="lvchip" style="background:${esc(l.color)};color:${esc(l.fg)}">Lv${l.level}</span>` : `<span class="lvchip pill ok">全認定</span>`;
     };
     return `<div class="shell wide"><header class="top"><div class="top-row"><h1>会員一覧</h1><span class="sub">${st.list.length}人</span></div>
@@ -487,7 +519,9 @@
     const d = S.detail;
     if (!d || !d.member) return `<div class="shell"><header class="top"><a class="back" href="#/staff">‹ 会員一覧</a></header><main class="main"><div class="empty">読み込み中…</div></main>${nav("staff")}</div>`;
     const m = d.member;
-    const tv = trackView(S.track, d.checks, S.open[S.track], capOf(m, S.track));
+    const dsport = S.dsport || m.sport || "wind";
+    const track = trackFor(dsport);
+    const tv = trackView(track, d.checks, S.open[track], capOf(m, track));
     const waiting = S.items.filter((i) => { const c = d.checks.get(i.id); return c && c.self_checked_at && !c.certified_at; })
       .map((i) => ({ ...i, cert: false, self: true, locked: i.level > capOf(m, i.track) }));
     const admin = S.me.role === "admin";
@@ -507,8 +541,8 @@
           <button type="button" class="btn" data-act="lesson"${S.busy ? " disabled" : ""}>記録を保存</button>
         </div>
         <div class="card" style="gap:12px"><h2>スキルの認定</h2>
-          <div class="seg" style="background:#E4EAF0">${[["basic", "基礎・応用"], ["free", "フリースタイル"]].map(([id, label]) =>
-            `<button type="button" data-act="track" data-track="${id}" aria-pressed="${S.track === id}" style="color:var(--ink)">${label}</button>`).join("")}</div>
+          ${sportSeg(dsport, "dsport", true)}
+          ${trackTabs(dsport, true)}
           <div class="between"><b>認定 ${tv.certCount} / ${tv.total}</b><span class="small muted">タップで認定／もう一度タップで取り消し</span></div>
         </div>
         ${levelList(tv, "staff")}
@@ -517,7 +551,7 @@
         ${admin ? `<div class="card"><h2>会員情報（管理者のみ）</h2>
           <label class="f">表示名（空欄ならLINEの名前：${esc(m.line_name || "")}）<input class="in" id="m-name" maxlength="50" value="${esc(m.display_name || "")}"></label>
           <label class="f">プラン<select class="in" id="m-plan"><option value="">未設定</option>${(m.plan && !PLANS.includes(m.plan) ? [m.plan] : []).concat(PLANS).map((pl) => `<option value="${esc(pl)}"${m.plan === pl ? " selected" : ""}>${esc(pl)}</option>`).join("")}</select></label>
-          <p class="small muted" style="margin:-4px 0 0">ビジター・その他・未設定は、基礎編レベル4／フリースタイルレベル3まで、認定バッジなしになります。</p>
+          <p class="small muted" style="margin:-4px 0 0">ビジター・その他・未設定は、ウインド基礎・応用レベル4／フリースタイルレベル3、ウイング基礎・応用レベル3まで、認定バッジなしになります。</p>
           <label class="f">種目<select class="in" id="m-sport"><option value="wind"${m.sport === "wind" ? " selected" : ""}>ウインドサーフィン</option><option value="wing"${m.sport === "wing" ? " selected" : ""}>ウイングフォイル</option></select></label>
           <label class="f">役割<select class="in" id="m-role">${["member", "instructor", "admin"].map((r) => `<option value="${r}"${m.role === r ? " selected" : ""}>${roleLabel[r]}</option>`).join("")}</select></label>
           <button type="button" class="btn ghost" data-act="save-member"${S.busy ? " disabled" : ""}>会員情報を保存</button></div>` : ""}
@@ -525,11 +559,13 @@
   }
 
   function viewVideos() {
-    const levels = S.levels.filter((l) => l.track === S.track);
+    const track = trackFor(S.sport);
+    const levels = S.levels.filter((l) => l.track === track);
     return `<div class="shell"><header class="top">
         <a class="back" href="#/staff">‹ 会員一覧</a>
         <div><h1>動画リンクの設定</h1><div class="sub">YouTubeのリンクを貼ると、会員の画面の項目に「動画」ボタンが出ます。</div></div>
-        ${trackTabs()}
+        ${sportSeg(S.sport)}
+        ${trackTabs(S.sport)}
       </header>
       <main class="main">${levels.map((l) => `<div class="card"><h2>レベル${l.level} ${esc(l.theme)}</h2>
         ${S.items.filter((i) => i.track === l.track && i.level === l.level).map((i) => `
@@ -572,7 +608,7 @@
       S.staff.list = await api.overview();
     } else if (r.startsWith("/staff/") && isStaff(S.me)) {
       const id = r.slice(7);
-      if (!S.detail || S.detail.id !== id) { S.detail = { id }; S.open = { basic: undefined, free: undefined }; }
+      if (!S.detail || S.detail.id !== id) { S.detail = { id }; S.open = {}; S.dsport = null; }
       render();
       await loadDetail(id);
     } else if (["/", "/roadmap", "/history", ""].includes(r)) {
@@ -589,7 +625,8 @@
   // ---------- 操作 ----------
   async function act(el) {
     const a = el.dataset.act;
-    if (a === "sport") { S.sport = el.dataset.sport; store.set("triton-sport", S.sport); return render(); }
+    if (a === "sport") { S.sport = el.dataset.sport; store.set("triton-sport", S.sport); S.track = mainTrack(S.sport); return render(); }
+    if (a === "dsport") { S.dsport = el.dataset.sport; S.track = mainTrack(S.dsport); return render(); }
     if (a === "track") { S.track = el.dataset.track; return render(); }
     if (a === "filter") { S.staff.filter = el.dataset.filter; return render(); }
     if (a === "font") {
