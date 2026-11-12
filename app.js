@@ -26,7 +26,7 @@
   // 種目ごとのロードマップ（[track, タブ名]）。先頭がメイン（ホームの「挑戦中」に使う）
   const SPORTS = {
     wind: { name: "ウインドサーフィン", tracks: [["basic", "基礎・応用"], ["free", "フリースタイル"]] },
-    wing: { name: "ウイングフォイル", tracks: [["wing", "基礎・応用"]] },
+    wing: { name: "ウイングフォイル", tracks: [["wing", "基礎・応用"], ["wingfree", "フリースタイル"]] },
   };
   const sportOf = (k) => SPORTS[k] || SPORTS.wind;
   const mainTrack = (k) => sportOf(k).tracks[0][0];
@@ -163,7 +163,7 @@
       async overview() { return ok(await sb.from("member_overview").select("*")); },
       async toggleSelf(itemId) { ok(await sb.rpc("toggle_self_check", { p_item_id: itemId })); },
       async setCertified(memberId, itemId, value) { ok(await sb.rpc("set_certified", { p_member_id: memberId, p_item_id: itemId, p_value: value })); },
-      async recordLesson(memberId, comment, date) { ok(await sb.rpc("record_lesson", { p_member_id: memberId, p_comment: comment, p_date: date })); },
+      async recordLesson(memberId, comment, date, sport) { ok(await sb.rpc("record_lesson", { p_member_id: memberId, p_comment: comment, p_date: date, p_sport: sport })); },
       async setGoal(n) { ok(await sb.rpc("set_monthly_goal", { p_goal: n })); },
       async updateMember(id, patch) { ok(await sb.from("members").update(patch).eq("id", id)); },
       async setItemVideo(itemId, url) { ok(await sb.rpc("set_item_video", { p_item_id: itemId, p_url: url })); },
@@ -218,7 +218,7 @@
     const t = todayJST();
     const lessons = [
       { id: 4, member_id: "d1", lesson_date: t, source: "self", instructor_name: null, comment: null, member_memo: "北風5m。ジャイブで3回沈。" },
-      { id: 3, member_id: "d1", lesson_date: t, source: "staff", instructor_name: "お試し 講師", comment: "ハーネスに体重を預けられるようになってきました。次は片手走行に挑戦しましょう。", member_memo: null },
+      { id: 3, member_id: "d1", lesson_date: t, sport: "wind", source: "staff", instructor_name: "お試し 講師", comment: "ハーネスに体重を預けられるようになってきました。次は片手走行に挑戦しましょう。", member_memo: null },
       { id: 2, member_id: "d1", lesson_date: "2026-09-28", source: "staff", instructor_name: "お試し 講師", comment: null, member_memo: null },
       { id: 1, member_id: "d2", lesson_date: "2025-08-20", source: "staff", instructor_name: "お試し 講師", comment: "タックが安定してきました。", member_memo: "風上に戻れた！" },
     ];
@@ -252,7 +252,7 @@
         c.certified_at = v ? (c.certified_at || now) : null;
         c.certified_by = v ? "d1" : null;
       },
-      async recordLesson(mid, comment, date) { lessons.push({ id: nextId++, member_id: mid, lesson_date: date || t, source: "staff", instructor_name: "お試し 管理者", comment: comment || null, member_memo: null }); },
+      async recordLesson(mid, comment, date, sport) { lessons.push({ id: nextId++, member_id: mid, lesson_date: date || t, sport: sport || null, source: "staff", instructor_name: "お試し 管理者", comment: comment || null, member_memo: null }); },
       async addOwnSession(date, memo) { lessons.push({ id: nextId++, member_id: "d1", lesson_date: date || t, source: "self", instructor_name: null, comment: null, member_memo: memo || null }); },
       async setMemberMemo(id, memo) { lessons.find((l) => l.id === id).member_memo = memo || null; },
       async deleteOwnSession(id) { const i = lessons.findIndex((l) => l.id === id && l.source === "self"); if (i >= 0) lessons.splice(i, 1); },
@@ -356,8 +356,16 @@
     const ts = sportOf(sport).tracks;
     if (ts.length < 2) return "";
     return `<div class="seg"${light ? ' style="background:#E4EAF0"' : ""}>${ts.map(([id, label]) =>
-      `<button type="button" data-act="track" data-track="${id}" aria-pressed="${S.track === id}"${light ? ' style="color:var(--ink)"' : ""}>${label}</button>`).join("")}</div>`;
+      `<button type="button" data-act="track" data-track="${id}" aria-pressed="${S.track === id}"${light ? ' style="color:var(--ink)"' : ""}>${isWip(id) ? `<span>${label}</span><span class="tag"${light ? ' style="color:#8A6200"' : ""}>製作中</span>` : label}</button>`).join("")}</div>`;
   }
+
+  // レベルがまだ登録されていないロードマップは「製作中」
+  const isWip = (track) => !S.levels.some((l) => l.track === track);
+  const wipCard = (back) => `<div class="card" style="align-items:center;text-align:center;padding:32px 20px;gap:12px">
+        <div style="width:56px;height:56px;border-radius:50%;background:var(--wait-bg);color:var(--wait-fg);display:flex;align-items:center;justify-content:center">${ICON.tool}</div>
+        <h2 style="font-size:18px">このロードマップは製作中です</h2>
+        <p class="muted">公開までしばらくお待ちください。</p>
+        ${back ? `<button type="button" class="btn" data-act="track" data-track="${back}">基礎・応用に戻る</button>` : ""}</div>`;
 
   function sportSeg(sport, act = "sport", light) {
     return `<div class="seg"${light ? ' style="background:#E4EAF0"' : ""}>${Object.entries(SPORTS).map(([k, v]) =>
@@ -431,12 +439,18 @@
 
   function viewRoadmap() {
     const track = trackFor(S.sport);
+    const wip = isWip(track);
     const tv = trackView(track, S.checks, S.open[track], capOf(S.me, track));
-    const capText = sportOf(S.sport).tracks.map(([t, label]) => `${label}${t === "free" ? "" : "編"}はレベル${capOf(S.me, t)}`).join("、");
+    const capText = sportOf(S.sport).tracks.filter(([t]) => !isWip(t))
+      .map(([t, label]) => `${label}${t === "free" || t === "wingfree" ? "" : "編"}はレベル${capOf(S.me, t)}`).join("、");
+    const head = `<div><div class="sub">${sportOf(S.sport).name} ・ ${trackName(S.sport, track)}編</div><h1>スキルロードマップ</h1></div>
+        ${trackTabs(S.sport)}`;
+    if (wip) {
+      return `<div class="shell"><header class="top">${head}</header>
+      <main class="main">${wipCard(mainTrack(S.sport))}</main>${nav("roadmap")}</div>`;
+    }
     return `<div class="shell"><header class="top">
-        ${sportSeg(S.sport)}
-        <div><div class="sub">${sportOf(S.sport).name} ・ ${trackName(S.sport, track)}${track === "free" ? "" : "編"}</div><h1>スキルロードマップ</h1></div>
-        ${trackTabs(S.sport)}
+        ${head}
         <div><div class="between"><b>認定 ${tv.certCount} / ${tv.total}</b><span class="sub">認定待ち ${tv.selfCount}</span></div>
         <div class="bar" style="margin-top:6px"><i class="c" style="width:${pct(tv.certCount, tv.total)}"></i><i class="s" style="width:${pct(tv.selfCount, tv.total)}"></i></div></div>
       </header>
@@ -449,7 +463,8 @@
     // who: "member"（本人が見る） / "staff"（インストラクターが見る）
     const e = S.edit && S.edit.id === l.id ? S.edit.kind : null;
     const self = l.source === "self";
-    const head = `<div class="between"><b>${fmtDate(l.lesson_date)}</b>${self ? '<span class="pill staff">自分で記録</span>' : `<span class="meta">${esc(l.instructor_name || "")}</span>`}</div>`;
+    const sportTag = l.sport && SPORTS[l.sport] ? ` <span class="pill ${l.sport === "wing" ? "wait" : "staff"}" style="margin-left:6px">${l.sport === "wing" ? "ウイング" : "ウインド"}</span>` : "";
+    const head = `<div class="between"><b>${fmtDate(l.lesson_date)}${sportTag}</b>${self ? '<span class="pill staff">自分で記録</span>' : `<span class="meta">${esc(l.instructor_name || "")}</span>`}</div>`;
     const commentPart = who === "staff" && e === "comment"
       ? `<label class="f">インストラクターのコメント<textarea class="in" id="edit-text" rows="3" maxlength="1000">${esc(l.comment || "")}</textarea></label>
          <div class="row"><button type="button" class="btn" style="min-height:40px" data-act="save-comment" data-id="${l.id}">保存</button><button type="button" class="btn ghost" style="min-height:40px" data-act="cancel-edit">やめる</button></div>`
@@ -537,15 +552,16 @@
           <p class="small muted">確認できたらタップして認定します。</p>${waiting.map((i) => itemRow(i, "staff")).join("")}</div>` : ""}
         <div class="card"><h2>レッスンを記録</h2>
           <label class="f">日付<input class="in" type="date" id="lesson-date" value="${todayJST()}"></label>
+          <label class="f">種目<select class="in" id="lesson-sport">${Object.entries(SPORTS).map(([k, v]) => `<option value="${k}"${(m.sport || "wind") === k ? " selected" : ""}>${v.name}</option>`).join("")}</select></label>
           <label class="f">ひとことコメント（会員に表示）<textarea class="in" id="lesson-comment" rows="3" maxlength="1000" placeholder="今日よかった点と、次に挑戦すること"></textarea></label>
           <button type="button" class="btn" data-act="lesson"${S.busy ? " disabled" : ""}>記録を保存</button>
         </div>
         <div class="card" style="gap:12px"><h2>スキルの認定</h2>
           ${sportSeg(dsport, "dsport", true)}
           ${trackTabs(dsport, true)}
-          <div class="between"><b>認定 ${tv.certCount} / ${tv.total}</b><span class="small muted">タップで認定／もう一度タップで取り消し</span></div>
+          ${isWip(track) ? "" : `<div class="between"><b>認定 ${tv.certCount} / ${tv.total}</b><span class="small muted">タップで認定／もう一度タップで取り消し</span></div>`}
         </div>
-        ${levelList(tv, "staff")}
+        ${isWip(track) ? wipCard() : levelList(tv, "staff")}
         <div class="card"><div class="between"><h2>記録</h2><span class="small muted">累計 ${lessonCounts(d.lessons).total}回 ・ ${lessonCounts(d.lessons).y}年 ${lessonCounts(d.lessons).year}回</span></div>
           ${d.lessons.length ? d.lessons.slice(0, 30).map((l) => lessonBlock(l, "staff")).join("") : '<div class="empty">まだ記録はありません。</div>'}</div>
         ${admin ? `<div class="card"><h2>会員情報（管理者のみ）</h2>
@@ -567,7 +583,7 @@
         ${sportSeg(S.sport)}
         ${trackTabs(S.sport)}
       </header>
-      <main class="main">${levels.map((l) => `<div class="card"><h2>レベル${l.level} ${esc(l.theme)}</h2>
+      <main class="main">${isWip(track) ? wipCard() : ""}${levels.map((l) => `<div class="card"><h2>レベル${l.level} ${esc(l.theme)}</h2>
         ${S.items.filter((i) => i.track === l.track && i.level === l.level).map((i) => `
           <label class="f">${esc(i.label)}
             <div class="row" style="flex-wrap:nowrap"><input class="in" type="url" inputmode="url" id="v-${esc(i.id)}" value="${esc(i.video_url || "")}" placeholder="https://youtu.be/…">
@@ -666,7 +682,8 @@
       } else if (a === "lesson") {
         const comment = document.getElementById("lesson-comment").value;
         const date = document.getElementById("lesson-date").value || null;
-        await api.recordLesson(S.detail.id, comment, date);
+        const sport = document.getElementById("lesson-sport").value;
+        await api.recordLesson(S.detail.id, comment, date, sport);
         await loadDetail(S.detail.id);
         S.staff.list = null;
         toast("レッスンを記録しました");
